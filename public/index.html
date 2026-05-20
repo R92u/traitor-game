@@ -154,7 +154,8 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
     <div id="host-panel" class="card" style="width:100%;display:none;">
       <p class="subtitle" style="margin-bottom:12px;">⚙️ Ведущий</p>
       <div class="flex-col gap-m">
-        <div><label>🎯 Слово</label><input id="wait-word" type="text" placeholder="Банан, Марс..." maxlength="40"></div>
+        <div><label>🎯 Секретное слово</label><input id="wait-word" type="text" placeholder="Банан, Марс..." maxlength="40"></div>
+        <div><label>📚 Тема раунда (видна всем)</label><input id="wait-theme" type="text" placeholder="Фрукты, Планеты, Спорт..." maxlength="40"></div>
         <div>
           <label>🔄 Ходов на игрока</label>
           <input id="wait-max-turns" type="number" min="1" max="10" value="3" placeholder="3">
@@ -322,10 +323,11 @@ function randomTraitor(){const sel=document.getElementById('wait-traitor-sel');c
 
 function startGame(){
   const word=document.getElementById('wait-word').value.trim();
+  const theme=document.getElementById('wait-theme').value.trim();
   const traitorId=document.getElementById('wait-traitor-sel').value;
   const maxTurns=parseInt(document.getElementById('wait-max-turns').value)||3;
   if(!word||!traitorId){toast('Заполни поля!');return;}
-  socket.emit('game:start',{word,traitorId,maxTurns},res=>{if(res&&!res.ok)toast(res.error||'Ошибка');});
+  socket.emit('game:start',{word,traitorId,maxTurns,theme},res=>{if(res&&!res.ok)toast(res.error||'Ошибка');});
 }
 
 function renderWaitingPlayers(players){
@@ -466,7 +468,7 @@ function renderGame(state){
   const participants=state.players.filter(p=>!p.isHost);
   const alive=participants.filter(p=>p.alive);
   
-  document.getElementById('game-badges').innerHTML=`<span class="tag tag-blue">Раунд ${state.round||1}</span><span class="tag tag-gold">${alive.length} в игре</span><span class="tag tag-green">Макс ходов: ${state.maxTurns||3}</span>`;
+  document.getElementById('game-badges').innerHTML=`<span class="tag tag-blue">Раунд ${state.round||1}</span><span class="tag tag-gold">${alive.length} в игре</span><span class="tag tag-green">Макс ходов: ${state.maxTurns||3}</span>${state.theme?`<span class="tag" style="background:rgba(76,201,240,.2);color:var(--accent2);border:1px solid var(--accent2);">📚 ${state.theme}</span>`:''}`;
   
   if(!me.isHost){
     const curr=alive[state.currentTurnIndex%alive.length];
@@ -512,16 +514,19 @@ function renderPlayerTable(state){
   const radius=200;
   const centerX=300, centerY=250;
   
+  // PATCH 1: Theme visible to all in center
+  const themeDisplay=state.theme?`<div style="font-size:.7rem;color:var(--accent2);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">📚 ${state.theme}</div>`:'';
+  
   // PATCH 2: Show word in center for non-traitors, ??? for traitor
   let centerContent='';
   if(me.isHost){
-    centerContent=`<div class="table-word">${state.secretWord||'?'}</div><div class="table-center-text" style="margin-top:8px;">Ведущий</div>`;
+    centerContent=`${themeDisplay}<div class="table-word">${state.secretWord||'?'}</div><div class="table-center-text" style="margin-top:8px;">Ведущий</div>`;
   }else if(myRole && myRole.isTraitor){
-    centerContent='<div class="table-word">???</div><div class="table-center-text" style="margin-top:8px;">🗡️ Ты предатель</div>';
+    centerContent=`${themeDisplay}<div class="table-word">???</div><div class="table-center-text" style="margin-top:8px;">🗡️ Ты предатель</div>`;
   }else if(myRole && !myRole.isTraitor){
-    centerContent=`<div class="table-word">${myRole.word||state.secretWord}</div><div class="table-center-text" style="margin-top:8px;">👁️ Секретное слово</div>`;
+    centerContent=`${themeDisplay}<div class="table-word">${myRole.word||state.secretWord}</div><div class="table-center-text" style="margin-top:8px;">👁️ Секретное слово</div>`;
   }else{
-    centerContent='<div class="table-center-text">🎯<br>Секретное слово</div>';
+    centerContent=`${themeDisplay}<div class="table-center-text">🎯<br>Секретное слово</div>`;
   }
   
   let html=`<div class="table-circle">${centerContent}</div>`;
@@ -548,6 +553,9 @@ function renderPlayerTable(state){
     const isTraitor=p.id===gameState.traitorId;
     const turnsLeft=Math.max(0,(state.maxTurns||3)-(p.turnsUsed||0));
     
+    // PATCH 3: Show hint button for traitor (only once per round)
+    const showHintBtn = isMe && myRole?.isTraitor && !state.hintUsed;
+    
     html+=`<div class="player-seat ${isCurr?'current':''}" style="left:${x}px;top:${y}px;">
       <svg width="55" height="70" viewBox="0 0 60 80">
         <circle cx="30" cy="15" r="12" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/>
@@ -561,7 +569,7 @@ function renderPlayerTable(state){
       <div class="player-seat-name">${p.name}</div>
       <div class="role-indicator">${isMe&&myRole?(myRole.isTraitor?'🗡️':'👁️'):''}</div>
       <div class="turns-counter">🔄 ${turnsLeft}/${state.maxTurns||3}</div>
-      ${isMe?`<button class="btn btn-green" onclick="endMyTurn()">✓ Закончить ход</button>${isTraitor&&myRole?.isTraitor?'<button class="btn btn-primary" onclick="startGuessing()">🎯 Угадать</button>':''}`:''}
+      ${isMe?`<button class="btn btn-green" onclick="endMyTurn()">✓ Закончить ход</button>${isTraitor&&myRole?.isTraitor?'<button class="btn btn-primary" onclick="startGuessing()">🎯 Угадать</button>':''}${showHintBtn?'<button class="btn btn-secondary" style="background:rgba(76,201,240,.15);color:var(--accent2);border-color:var(--accent2);" onclick="useHint()">💡 Подсказка</button>':''}`:''}
     </div>`;
   });
   
@@ -577,6 +585,30 @@ function renderHostRoles(state){
 function endMyTurn(){socket.emit('game:nextTurn');}
 function hostNextTurn(){socket.emit('game:nextTurn');}
 function playAgain(){socket.emit('game:playAgain');}
+
+// PATCH 3: Use hint (first letter)
+function useHint(){
+  if(gameState.hintUsed){toast('Подсказка уже использована!');return;}
+  if(!myRole?.isTraitor){toast('Только предатель может использовать!');return;}
+  socket.emit('game:useHint');
+}
+
+function showHintModal(firstLetter){
+  // Create a modal showing the first letter
+  const modal=document.createElement('div');
+  modal.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;';
+  modal.innerHTML=`
+    <div style="background:var(--card);border:2px solid var(--accent2);border-radius:20px;padding:40px;text-align:center;max-width:400px;box-shadow:0 0 80px rgba(76,201,240,.3);">
+      <div style="font-size:3.5rem;margin-bottom:14px;">💡</div>
+      <div style="font-family:'Unbounded',sans-serif;font-size:1.3rem;font-weight:900;color:var(--accent2);margin-bottom:8px;">Подсказка</div>
+      <p style="color:var(--muted);font-size:.9rem;margin-bottom:20px;">Слово начинается с буквы:</p>
+      <div style="font-family:'Unbounded',sans-serif;font-size:5rem;font-weight:900;color:var(--gold);padding:20px;background:var(--surface);border-radius:16px;border:2px solid var(--gold);margin-bottom:24px;text-shadow:0 0 30px rgba(255,209,102,.4);">${firstLetter}</div>
+      <p style="color:var(--muted);font-size:.8rem;margin-bottom:16px;">⚠️ Подсказка использована, второй раз нельзя!</p>
+      <button class="btn btn-primary btn-full" onclick="this.closest('div[style*=fixed]').remove()">Понятно ✓</button>
+    </div>
+  `;
+  document.body.appendChild(modal);
+}
 
 /* VOTE */
 function startVote(){
@@ -802,6 +834,11 @@ socket.on('game:backToLobby',()=>{
 });
 
 socket.on('host:promoted',()=>{me.isHost=true;toast('Ты ведущий!',true);});
+
+// PATCH 3: Hint received (only traitor gets this)
+socket.on('game:hintReceived',({firstLetter})=>{
+  showHintModal(firstLetter);
+});
 </script>
 </body>
 </html>

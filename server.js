@@ -21,6 +21,7 @@ function makeLobby(hostName, hostSocketId) {
     hostId: hostSocketId,
     hostName,
     word: '',
+    theme: '',              // PATCH 1: theme for the round (visible to all)
     traitorId: null,
     state: 'waiting',
     players: [],
@@ -28,14 +29,16 @@ function makeLobby(hostName, hostSocketId) {
     revealIndex: 0,
     currentTurnIndex: 0,
     round: 1,
-    maxTurns: 3,            // PATCH 1: max turns per player
-    turnsUsed: {},          // {socketId: count}
+    maxTurns: 3,
+    turnsUsed: {},
     votes: {},
-    voteUsed: false,        // PATCH 3: only one vote per game
+    voteUsed: false,
     voteTimer: null,
     voteEndTime: null,
-    guessing: false,        // PATCH 4: traitor is guessing
+    guessing: false,
     guessText: '',
+    rolesSeen: {},
+    hintUsed: false,        // PATCH 3: traitor hint used this round
     createdAt: Date.now(),
   };
 }
@@ -63,11 +66,12 @@ function broadcast(lobby) {
     round: lobby.round,
     traitorId: lobby.traitorId,
     secretWord: lobby.word,
+    theme: lobby.theme,             // PATCH 1
     maxTurns: lobby.maxTurns,
     voteUsed: lobby.voteUsed,
     guessing: lobby.guessing,
     guessText: lobby.guessText,
-    // For reveal phase
+    hintUsed: lobby.hintUsed,       // PATCH 3
     currentRevealId: currentReveal?.socketId || null,
     currentRevealName: currentReveal?.name || null,
     revealIndex: lobby.revealIndex,
@@ -91,6 +95,26 @@ function shuffle(arr) {
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
+}
+
+// PATCH 2: Weighted shuffle - traitor much less likely to be first
+function weightedShuffle(arr, traitorId) {
+  // First, do normal shuffle
+  const shuffled = shuffle([...arr]);
+  
+  // If traitor ended up in first position, with high probability swap them
+  // Effectively reducing traitor's chance of going first to ~15-20%
+  if (shuffled[0]?.id === traitorId && shuffled.length > 1) {
+    // 80% chance to move traitor away from position 0
+    if (Math.random() < 0.8) {
+      // Move traitor to a random non-first position
+      const traitor = shuffled.shift();
+      const newPos = 1 + Math.floor(Math.random() * shuffled.length);
+      shuffled.splice(newPos, 0, traitor);
+    }
+  }
+  
+  return shuffled;
 }
 
 function advanceReveal(lobby) {
@@ -227,8 +251,8 @@ io.on('connection', (socket) => {
     io.emit('lobbies:changed');
   });
 
-  // PATCH 1: Start game with maxTurns parameter
-  socket.on('game:start', ({ word, traitorId, maxTurns }, cb) => {
+  // PATCH 1: Accept theme. PATCH 2: Weighted shuffle for traitor.
+  socket.on('game:start', ({ word, traitorId, maxTurns, theme }, cb) => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || socket.id !== lobby.hostId) return cb?.({ ok: false });
     if (!word) return cb?.({ ok: false, error: 'Введи слово' });
@@ -238,10 +262,14 @@ io.on('connection', (socket) => {
     if (gameParticipants.length < 2) return cb?.({ ok: false, error: 'Минимум 2 игрока (не считая ведущего)' });
 
     lobby.word = word;
+    lobby.theme = theme || '';
     lobby.traitorId = traitorId;
     lobby.maxTurns = parseInt(maxTurns) || 3;
     lobby.state = 'revealing';
-    lobby.revealQueue = shuffle([...gameParticipants]);
+    
+    // PATCH 2: Weighted shuffle - traitor has lower chance to go first
+    lobby.revealQueue = weightedShuffle([...gameParticipants], traitorId);
+    
     lobby.revealIndex = 0;
     lobby.currentTurnIndex = 0;
     lobby.round = 1;
@@ -251,6 +279,7 @@ io.on('connection', (socket) => {
     lobby.guessing = false;
     lobby.guessText = '';
     lobby.rolesSeen = {};
+    lobby.hintUsed = false;
     lobby.players.forEach(p => { p.alive = true; });
 
     cb?.({ ok: true });
@@ -377,7 +406,25 @@ io.on('connection', (socket) => {
     }
   });
 
-  // PATCH 4: Traitor starts guessing - all players see it live
+  // PATCH 3: Traitor uses hint to see first letter
+  socket.on('game:useHint', () => {
+    const lobby = lobbies[socket.data.lobbyCode];
+    if (!lobby || lobby.state !== 'playing') return;
+    if (socket.id !== lobby.traitorId) return;
+    if (lobby.hintUsed) return; // already used
+    
+    lobby.hintUsed = true;
+    const firstLetter = lobby.word.charAt(0).toUpperCase();
+    
+    // Send hint only to traitor
+    io.to(socket.id).emit('game:hintReceived', {
+      firstLetter,
+    });
+    
+    broadcast(lobby);
+  });
+
+  // PATCH 3: Traitor starts guessing - all players see it live
   socket.on('game:startGuessing', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'playing') return;
@@ -454,19 +501,18 @@ io.on('connection', (socket) => {
     // Reset game state but keep scores
     lobby.state = 'waiting';
     lobby.word = '';
+    lobby.theme = '';
     lobby.traitorId = null;
     lobby.turnsUsed = {};
     lobby.votes = {};
     lobby.voteUsed = false;
     lobby.guessing = false;
     lobby.guessText = '';
+    lobby.hintUsed = false;
     lobby.players.forEach(p => { p.alive = true; });
     
-    // Scores are preserved
     broadcast(lobby);
     io.emit('lobbies:changed');
-    
-    // Notify all to go back to lobby
     io.to(lobby.code).emit('game:backToLobby');
   });
 
