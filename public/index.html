@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ПРЕДАТЕЛЬ</title>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=Manrope:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<style>
+:root{--bg:#0a0a0f;--surface:#111118;--card:#16161f;--border:#2a2a3a;--accent:#e63946;--accent2:#4cc9f0;--gold:#ffd166;--text:#f0f0f5;--muted:#6b6b85;--green:#06d6a0;--radius:16px;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'Manrope',sans-serif;min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 60% 50% at 20% 10%,rgba(230,57,70,.07) 0%,transparent 60%),radial-gradient(ellipse 50% 40% at 80% 90%,rgba(76,201,240,.05) 0%,transparent 60%);pointer-events:none;z-index:0;}
+.screen{display:none;position:relative;z-index:1;}
+.screen.active{display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:36px 20px;}
+h1.logo{font-family:'Unbounded',sans-serif;font-size:clamp(2.2rem,8vw,4.5rem);font-weight:900;letter-spacing:-2px;line-height:.95;text-align:center;}
+h1.logo span{color:var(--accent);}
+h2{font-family:'Unbounded',sans-serif;font-size:clamp(1.1rem,3vw,1.6rem);font-weight:700;letter-spacing:-.5px;}
+.subtitle{color:var(--muted);font-size:.8rem;font-weight:400;letter-spacing:.5px;text-transform:uppercase;}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 24px;border-radius:12px;font-family:'Manrope',sans-serif;font-size:.92rem;font-weight:600;cursor:pointer;border:none;transition:all .18s;text-decoration:none;}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:0 4px 24px rgba(230,57,70,.3);}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(230,57,70,.45);}
+.btn-secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+.btn-secondary:hover{border-color:var(--accent);}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);}
+.btn-ghost:hover{color:var(--text);}
+.btn-green{background:var(--green);color:#0a0a0f;box-shadow:0 4px 20px rgba(6,214,160,.25);}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;}
+.btn-full{width:100%;}
+input,textarea,select{background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'Manrope',sans-serif;font-size:1rem;padding:12px 16px;width:100%;outline:none;}
+input:focus,textarea:focus,select:focus{border-color:var(--accent2);}
+input::placeholder{color:var(--muted);}
+label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px;}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
+.tag{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:100px;font-size:.72rem;font-weight:600;}
+.tag-red{background:rgba(230,57,70,.15);color:var(--accent);}
+.tag-blue{background:rgba(76,201,240,.1);color:var(--accent2);}
+.tag-gold{background:rgba(255,209,102,.1);color:var(--gold);}
+.tag-green{background:rgba(6,214,160,.1);color:var(--green);}
+.wrap{width:100%;max-width:580px;}
+.flex-col{display:flex;flex-direction:column;}
+.flex-row{display:flex;flex-direction:row;align-items:center;}
+.center{align-items:center;text-align:center;}
+.gap-s{gap:8px;}.gap-m{gap:14px;}.gap-l{gap:22px;}
+.mt-s{margin-top:8px;}.mt-m{margin-top:14px;}.mt-l{margin-top:22px;}.mt-xl{margin-top:38px;}
+.sep{width:100%;height:1px;background:var(--border);margin:8px 0;}
+.j-between{justify-content:space-between;}
+.lobby-item{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:all .2s;margin-bottom:8px;}
+.lobby-item:hover{border-color:var(--accent2);}
+.lobby-item.selected{border-color:var(--accent);background:rgba(230,57,70,.06);}
+.player-list{display:flex;flex-wrap:wrap;gap:8px;}
+.player-chip{display:flex;align-items:center;gap:8px;padding:7px 13px;background:var(--surface);border:1px solid var(--border);border-radius:100px;font-size:.88rem;font-weight:600;}
+.avatar{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0;}
+.role-reveal{width:100%;max-width:340px;padding:36px 28px;border-radius:20px;text-align:center;}
+.role-reveal.innocent{background:linear-gradient(145deg,#111820,#0d1a22);border:1px solid rgba(76,201,240,.3);}
+.role-reveal.traitor{background:linear-gradient(145deg,#1a0d0f,#200f11);border:1px solid rgba(230,57,70,.3);}
+.role-icon{font-size:3.5rem;margin-bottom:14px;}
+.role-title{font-family:'Unbounded',sans-serif;font-size:1.5rem;font-weight:900;margin-bottom:6px;}
+.role-reveal.innocent .role-title{color:var(--accent2);}
+.role-reveal.traitor .role-title{color:var(--accent);}
+.word-box{margin-top:18px;padding:14px;background:rgba(255,255,255,.05);border-radius:12px;font-size:1.25rem;font-weight:700;}
+.score-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-bottom:8px;}
+.score-points{font-family:'Unbounded',sans-serif;font-size:1.05rem;font-weight:700;color:var(--gold);}
+.vote-option{display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--surface);border:1px solid var(--border);border-radius:12px;cursor:pointer;margin-bottom:8px;}
+.vote-option:hover{border-color:var(--accent2);}
+.vote-option.selected{border-color:var(--accent);background:rgba(230,57,70,.08);}
+.status-bar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;margin-bottom:24px;}
+.pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(6,214,160,.4)}50%{box-shadow:0 0 0 7px rgba(6,214,160,0)}}
+.num-badge{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;font-family:'Unbounded',sans-serif;font-size:.65rem;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.anim{animation:fadeIn .35s ease forwards;}
+.anim-delay-1{animation-delay:.1s;opacity:0;}
+.anim-delay-2{animation-delay:.2s;opacity:0;}
+.big-code{font-family:'Unbounded',sans-serif;font-size:2.2rem;font-weight:900;letter-spacing:4px;color:var(--accent2);text-align:center;padding:16px;background:rgba(76,201,240,.06);border-radius:14px;}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(100px);background:var(--card);border:1px solid var(--border);padding:11px 20px;border-radius:12px;font-size:.88rem;font-weight:600;z-index:999;transition:transform .3s;}
+#toast.show{transform:translateX(-50%) translateY(0);}
+.game-table{display:flex;gap:16px;justify-content:center;flex-wrap:wrap;padding:20px;min-height:300px;}
+.player-model{display:flex;flex-direction:column;align-items:center;gap:8px;}
+.vote-modal-bg,.guess-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;display:none;align-items:center;justify-content:center;}
+.modal-card{width:90%;max-width:420px;max-height:80vh;overflow-y:auto;}
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<div id="screen-home" class="screen active center">
+  <div class="wrap flex-col center gap-m" style="padding:50px 0;">
+    <span style="font-size:3.2rem;" class="anim">🕵️</span>
+    <h1 class="logo anim anim-delay-1">ПРЕ<span>ДА</span>ТЕЛЬ</h1>
+    <p class="subtitle anim anim-delay-2">Онлайн · Несколько устройств</p>
+    <div class="card mt-xl anim" style="width:100%;max-width:420px;">
+      <div class="flex-col gap-m">
+        <div><label>Ваше имя</label><input id="home-name" type="text" placeholder="Введите никнейм..." maxlength="20" onkeydown="if(event.key==='Enter') createLobby()"></div>
+        <button class="btn btn-primary btn-full" onclick="createLobby()">+ Создать лобби</button>
+        <div class="sep"></div>
+        <div><label>Или введите код лобби</label><div class="flex-row gap-s"><input id="join-code" type="text" placeholder="XXXXX" maxlength="5" style="text-transform:uppercase;" onkeydown="if(event.key==='Enter') joinByCode()"><button class="btn btn-secondary" onclick="joinByCode()" style="flex-shrink:0;padding:12px 18px;">→</button></div></div>
+        <button class="btn btn-ghost btn-full" onclick="openLobbyBrowser()">🔍 Список лобби</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LOBBY BROWSER -->
+<div id="screen-browser" class="screen">
+  <div class="wrap flex-col gap-l" style="padding-top:20px;">
+    <div><h2>Открытые лобби</h2><p class="subtitle mt-s">Выберите и присоединитесь</p></div>
+    <div><label>Ваше имя</label><input id="browser-name" type="text" placeholder="Никнейм..." maxlength="20"></div>
+    <div id="lobby-list-el" class="flex-col gap-s"></div>
+    <button class="btn btn-primary btn-full" id="btn-join-selected" onclick="joinSelected()" disabled>Войти →</button>
+    <button class="btn btn-ghost btn-full" onclick="showScreen('screen-home')">← Назад</button>
+  </div>
+</div>
+
+<!-- WAITING -->
+<div id="screen-waiting" class="screen center">
+  <div class="wrap flex-col center gap-l" style="padding-top:30px;">
+    <div><h2 style="text-align:center;">Лобби</h2><div class="flex-row gap-s mt-s" style="justify-content:center;"><div class="pulse-dot"></div><span class="subtitle">Ожидание игроков</span></div></div>
+    <div class="big-code" id="lobby-code-display">XXXXX</div>
+    <p style="text-align:center;color:var(--muted);font-size:.88rem;">Поделитесь кодом с друзьями</p>
+    <button class="btn btn-secondary" onclick="copyCode()" style="font-size:.82rem;">📋 Скопировать код</button>
+    <div id="host-panel" class="card" style="width:100%;display:none;">
+      <p class="subtitle" style="margin-bottom:12px;">⚙️ Ведущий</p>
+      <div class="flex-col gap-m">
+        <div><label>🎯 Слово</label><input id="wait-word" type="text" placeholder="Банан, Марс..." maxlength="40"></div>
+        <div><label>🎭 Предатель</label><div class="flex-row gap-s"><select id="wait-traitor-sel" style="flex:2;"><option value="">— выбрать —</option></select><button class="btn btn-secondary" onclick="randomTraitor()" style="flex-shrink:0;padding:12px 16px;">🎲</button></div></div>
+        <button class="btn btn-primary btn-full" onclick="startGame()">Начать игру 🚀</button>
+      </div>
+    </div>
+    <div id="guest-wait-msg" class="card" style="width:100%;text-align:center;display:none;"><div class="spinner" style="margin:0 auto 14px;"></div><p style="color:var(--muted);font-size:.9rem;">Ождём ведущего...</p></div>
+    <div><p class="subtitle" style="margin-bottom:10px;">Игроки</p><div id="waiting-players" class="player-list"></div></div>
+    <button class="btn btn-ghost" onclick="leaveLobby()">← Выход</button>
+  </div>
+</div>
+
+<!-- REVEAL -->
+<div id="screen-reveal" class="screen center">
+  <div class="wrap flex-col center gap-l" style="padding-top:30px;">
+    <div><h2 style="text-align:center;">Раздача ролей</h2><p class="subtitle mt-s" id="reveal-whose-turn" style="text-align:center;font-size:.95rem;"></p></div>
+    <div id="role-card-wrap" style="width:100%;display:flex;justify-content:center;">
+      <div id="role-card" class="role-reveal innocent" style="opacity:0;">
+        <div class="role-icon" id="role-icon">👁️</div>
+        <div class="role-title" id="role-title">МИРНЫЙ</div>
+        <p style="color:var(--muted);font-size:.83rem;margin-top:5px;" id="role-desc"></p>
+        <div class="word-box" id="role-word"></div>
+      </div>
+    </div>
+    <button class="btn btn-secondary" id="btn-show-role" onclick="showMyRole()" style="display:none;">👁 Посмотреть роль</button>
+    <button class="btn btn-primary btn-full" id="btn-role-done" onclick="roleSeen()" style="display:none;">Готово ✓</button>
+  </div>
+</div>
+
+<!-- GAME -->
+<div id="screen-game" class="screen" style="padding:20px 0!important;">
+  <div style="width:100%;max-width:1200px;margin:0 auto;padding:0 20px;">
+    <div class="status-bar">
+      <div>
+        <div class="subtitle">Игра</div>
+        <div class="flex-row gap-s mt-s" id="game-badges"></div>
+      </div>
+      <div id="current-turn-info" style="text-align:right;display:none;">
+        <div class="subtitle">Ходит</div>
+        <div id="game-current-turn" style="font-weight:700;color:var(--gold);margin-top:4px;"></div>
+      </div>
+    </div>
+    <div id="game-table" class="game-table"></div>
+    <div id="vote-panel" style="position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:50;display:none;">
+      <button class="btn btn-primary" onclick="startVote()" style="padding:16px 20px;font-size:1rem;">🗳️<br>ГОЛОС</button>
+    </div>
+    <div id="host-game-panel" class="card" style="display:none;margin-top:24px;">
+      <p class="subtitle" style="margin-bottom:12px;">👁️ Ведущий</p>
+      <div><label>Слово:</label><div id="game-secret-word" style="font-weight:700;color:var(--gold);margin-bottom:16px;font-size:1.2rem;"></div></div>
+      <div id="host-roles-display" class="flex-col gap-s" style="margin-bottom:16px;"></div>
+      <div class="sep"></div>
+      <div class="flex-col gap-s">
+        <button class="btn btn-secondary btn-full" onclick="hostNextTurn()">➡️ Ход</button>
+        <button class="btn btn-secondary btn-full" onclick="startVote()">🗳️ Голосование</button>
+        <button class="btn btn-primary btn-full" onclick="traitorWins()">💀 Угадал!</button>
+        <button class="btn btn-green btn-full" onclick="playersWin()">✅ Пойман!</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VOTE MODAL -->
+<div id="vote-modal-bg" class="vote-modal-bg" onclick="if(event.target===this) closeVoteModal()">
+  <div class="card modal-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 style="margin:0;">Голосование</h2>
+      <button class="btn btn-ghost" style="padding:6px 12px;" onclick="closeVoteModal()">✕</button>
+    </div>
+    <p style="color:var(--muted);font-size:.9rem;margin-bottom:16px;">За кого голосуете?</p>
+    <div id="vote-options-list" class="flex-col gap-s" style="margin-bottom:16px;max-height:300px;overflow-y:auto;"></div>
+    <button class="btn btn-primary btn-full" onclick="submitVoteChoice()" style="margin-bottom:8px;">Проголосовать →</button>
+    <button class="btn btn-ghost btn-full" onclick="closeVoteModal()">Закрыть</button>
+  </div>
+</div>
+
+<!-- GUESS MODAL -->
+<div id="guess-modal-bg" class="guess-modal-bg" onclick="if(event.target===this) closeGuessModal()">
+  <div class="card" style="width:90%;max-width:400px;">
+    <h2 style="margin-bottom:14px;">Угадай слово</h2>
+    <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px;">Введи своё предположение</p>
+    <input id="guess-input" type="text" placeholder="Слово..." maxlength="50" onkeydown="if(event.key==='Enter') submitGuess()">
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-primary btn-full" onclick="submitGuess()">Отправить</button>
+      <button class="btn btn-ghost btn-full" onclick="closeGuessModal()">Отмена</button>
+    </div>
+  </div>
+</div>
+
+<!-- END -->
+<div id="screen-end" class="screen center">
+  <div class="wrap flex-col center gap-l" style="padding-top:40px;">
+    <div id="end-icon" style="font-size:5rem;"></div>
+    <h2 id="end-title" style="text-align:center;font-size:1.9rem;"></h2>
+    <p id="end-desc" style="text-align:center;color:var(--muted);"></p>
+    <div class="card" style="width:100%;">
+      <p class="subtitle" style="margin-bottom:12px;">🏆 Счёт</p>
+      <div id="end-scores" class="flex-col gap-s"></div>
+    </div>
+    <div id="end-btns" class="flex-col gap-s" style="width:100%;">
+      <button class="btn btn-primary btn-full" id="btn-replay" onclick="playAgain()" style="display:none;">🔄 Заново</button>
+      <button class="btn btn-ghost btn-full" onclick="leaveLobby()">Главное меню</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const socket = io();
+let me = {name:'',isHost:false,socketId:'',isTraitor:false,word:''};
+let lobbyCode = '';
+let myRole = null;
+let gameState = {state:'waiting',players:[],currentTurnIndex:0,round:1,traitorId:null,secretWord:''};
+let selectedVoteTarget = null;
+let myVoteSubmitted = false;
+let selectedLobbyCode = null;
+
+const COLORS = ['#e63946','#4cc9f0','#ffd166','#06d6a0','#9b5de5','#f15bb5','#00bbf9','#fee440'];
+function color(id){if(!id)return'#888';return COLORS[Math.abs(hashCode(String(id)))%COLORS.length];}
+function hashCode(s){let h=0;for(let i=0;i<s.length;i++){h=(h<<5)-h+s.charCodeAt(i);h|=0;}return h;}
+function av(name){return name&&name.length>0?name.charAt(0).toUpperCase():'?';}
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0);}
+function toast(msg,ok=false){const t=document.getElementById('toast');t.textContent=msg;t.style.borderColor=ok?'var(--green)':'var(--border)';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}return arr;}
+
+socket.on('connect',()=>{me.socketId=socket.id;});
+
+/* HOME */
+function createLobby(){const name=document.getElementById('home-name').value.trim();if(!name){toast('Введите имя!');return;}me.name=name;socket.emit('lobby:create',{name},res=>{if(!res.ok)return toast(res.error||'Ошибка');me.isHost=true;lobbyCode=res.code;enterWaiting();});}
+
+function joinByCode(){const code=document.getElementById('join-code').value.trim().toUpperCase();if(!code||code.length!==5)return toast('Введите код!');const name=document.getElementById('home-name').value.trim();if(!name)return toast('Введите имя!');me.name=name;doJoin(code,name);}
+
+function doJoin(code,name){socket.emit('lobby:join',{code,name},res=>{if(!res.ok)return toast(res.error||'Ошибка');me.isHost=res.isHost;lobbyCode=res.code;enterWaiting();});}
+
+function openLobbyBrowser(){const name=document.getElementById('home-name').value.trim();document.getElementById('browser-name').value=name;selectedLobbyCode=null;refreshBrowser();showScreen('screen-browser');}
+
+function refreshBrowser(){socket.emit('lobbies:list',res=>{const el=document.getElementById('lobby-list-el');if(!res.lobbies.length){el.innerHTML='<div style="text-align:center;color:var(--muted);padding:24px 0;">Нет лобби</div>';return;}el.innerHTML=res.lobbies.map(l=>`<div class="lobby-item ${selectedLobbyCode===l.code?'selected':''}" id="litem-${l.code}" onclick="selectLobby('${l.code}')"><div><div style="font-weight:700;color:var(--accent2);">${l.code}</div><div style="font-size:.85rem;color:var(--muted);margin-top:3px;">Ведущий: ${l.hostName}</div></div><span class="tag tag-blue">${l.playerCount} игр.</span></div>`).join('')});}
+
+function selectLobby(code){selectedLobbyCode=code;document.querySelectorAll('.lobby-item').forEach(el=>el.classList.remove('selected'));const el=document.getElementById('litem-'+code);if(el)el.classList.add('selected');document.getElementById('btn-join-selected').disabled=false;}
+
+function joinSelected(){if(!selectedLobbyCode)return;const name=document.getElementById('browser-name').value.trim()||document.getElementById('home-name').value.trim();if(!name)return toast('Введите имя!');me.name=name;doJoin(selectedLobbyCode,name);}
+
+/* WAITING */
+function enterWaiting(){document.getElementById('lobby-code-display').textContent=lobbyCode;document.getElementById('host-panel').style.display=me.isHost?'block':'none';document.getElementById('guest-wait-msg').style.display=me.isHost?'none':'block';showScreen('screen-waiting');}
+
+function copyCode(){navigator.clipboard?.writeText(lobbyCode).then(()=>toast('Код скопирован!',true)).catch(()=>toast('Код: '+lobbyCode,true));}
+
+function leaveLobby(){socket.disconnect();setTimeout(()=>location.reload(),300);}
+
+function randomTraitor(){const sel=document.getElementById('wait-traitor-sel');const opts=[...sel.options].filter(o=>o.value);if(!opts.length){toast('Ждём игроков!');return;}sel.value=opts[Math.floor(Math.random()*opts.length)].value;toast('Выбрано случайно ✓',true);}
+
+function startGame(){const word=document.getElementById('wait-word').value.trim();const traitorId=document.getElementById('wait-traitor-sel').value;if(!word||!traitorId){toast('Заполни поля!');return;}socket.emit('game:start',{word,traitorId},res=>{if(res&&!res.ok)toast(res.error||'Ошибка');});}
+
+function renderWaitingPlayers(players){const el=document.getElementById('waiting-players');el.innerHTML=players.map(p=>`<div class="player-chip"><div class="avatar" style="background:${color(p.id)}22;color:${color(p.id)}">${av(p.name)}</div>${p.name}${p.isHost?' <span class="tag tag-gold">ведущий</span>':''}</div>`).join('');const sel=document.getElementById('wait-traitor-sel');const prev=sel.value;sel.innerHTML='<option value="">— выбрать —</option>'+players.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');if(prev)sel.value=prev;}
+
+/* REVEAL */
+function showMyRole(){if(!myRole)return;const card=document.getElementById('role-card');const {isTraitor,word}=myRole;card.className='role-reveal '+(isTraitor?'traitor':'innocent');document.getElementById('role-icon').textContent=isTraitor?'🗡️':'👁️';document.getElementById('role-title').textContent=isTraitor?'ПРЕДАТЕЛЬ':'МИРНЫЙ';document.getElementById('role-desc').textContent=isTraitor?'Угадай слово!':'Твоё слово:';document.getElementById('role-word').textContent=isTraitor?'???':word;card.style.opacity='0';setTimeout(()=>{card.style.opacity='1';},10);document.getElementById('btn-show-role').style.display='none';document.getElementById('btn-role-done').style.display='flex';}
+
+function roleSeen(){socket.emit('game:roleSeen');}
+
+/* GAME */
+function renderGame(state){gameState=state;if(!state.players||state.players.length===0)return;const alive=state.players.filter(p=>p.alive);document.getElementById('game-badges').innerHTML=`<span class="tag tag-blue">Раунд ${state.round||1}</span><span class="tag tag-gold">${alive.length} в игре</span>`;if(!me.isHost){const curr=alive[state.currentTurnIndex%alive.length];const ti=document.getElementById('current-turn-info');if(ti){ti.style.display=curr?'block':'none';if(curr)document.getElementById('game-current-turn').textContent=curr.name;}}if(me.isHost){document.getElementById('host-game-panel').style.display='block';document.getElementById('vote-panel').style.display='none';document.getElementById('game-secret-word').textContent=state.secretWord||'?';renderHostRoles(state);}else{document.getElementById('host-game-panel').style.display='none';document.getElementById('vote-panel').style.display='block';}renderPlayerTable(state);}
+
+function renderPlayerTable(state){const alive=state.players.filter(p=>p.alive);const curr=alive[state.currentTurnIndex%alive.length];const tableEl=document.getElementById('game-table');tableEl.innerHTML=state.players.map(p=>{if(!p.alive)return'';const isCurr=curr&&p.id===curr.id;const isMe=p.id===me.socketId;const isTraitor=p.id===gameState.traitorId;return`<div class="player-model"><svg width="60" height="80" viewBox="0 0 60 80" style="margin-bottom:8px;"><circle cx="30" cy="15" r="12" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/><rect x="20" y="30" width="20" height="25" rx="6" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/><line x1="18" y1="38" x2="2" y2="35" stroke="var(--text)" stroke-width="1.5"/><line x1="42" y1="38" x2="58" y2="35" stroke="var(--text)" stroke-width="1.5"/><line x1="24" y1="55" x2="22" y2="75" stroke="var(--text)" stroke-width="1.5"/><line x1="36" y1="55" x2="38" y2="75" stroke="var(--text)" stroke-width="1.5"/></svg><div style="font-weight:700;max-width:80px;font-size:.85rem;">${p.name}</div><div style="font-size:.7rem;color:var(--muted);">${isMe&&myRole?myRole.isTraitor?'🗡️':'👁️':''}</div>${isMe?`<button class="btn btn-green" style="padding:6px 12px;font-size:.75rem;" onclick="socket.emit('game:nextTurn')">✓ Ход</button>${isTraitor&&myRole?.isTraitor?'<button class="btn btn-primary" style="padding:6px 12px;font-size:.75rem;margin-top:4px;" onclick="openGuessModal()">🎯 Угадать</button>':''}`:''}</div>`}).filter(h=>h).join('');}
+
+function renderHostRoles(state){const el=document.getElementById('host-roles-display');el.innerHTML=state.players.map(p=>`<div class="score-row"><div>${p.name}</div><span class="tag ${p.id===state.traitorId?'tag-red':'tag-blue'}">${p.id===state.traitorId?'ПРЕДАТЕЛЬ':state.secretWord}</span></div>`).join('');}
+
+function hostNextTurn(){socket.emit('game:nextTurn');}
+function traitorWins(){socket.emit('game:traitorWins');}
+function playersWin(){socket.emit('game:playersWin');}
+function playAgain(){socket.emit('game:playAgain');}
+
+/* VOTE */
+function startVote(){selectedVoteTarget=null;myVoteSubmitted=false;const alive=gameState.players.filter(p=>p.alive);const el=document.getElementById('vote-options-list');el.innerHTML=alive.map(p=>`<div class="vote-option" id="vopt-${p.id}" onclick="selectVoteFor('${p.id}')"><svg width="36" height="36" viewBox="0 0 60 80"><circle cx="30" cy="15" r="12" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/><rect x="20" y="30" width="20" height="25" rx="6" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/><line x1="18" y1="38" x2="2" y2="35" stroke="var(--text)" stroke-width="1.5"/><line x1="42" y1="38" x2="58" y2="35" stroke="var(--text)" stroke-width="1.5"/><line x1="24" y1="55" x2="22" y2="75" stroke="var(--text)" stroke-width="1.5"/><line x1="36" y1="55" x2="38" y2="75" stroke="var(--text)" stroke-width="1.5"/></svg><span>${p.name}</span></div>`).join('');document.getElementById('vote-modal-bg').style.display='flex';}
+
+function selectVoteFor(id){if(myVoteSubmitted)return;selectedVoteTarget=id;document.querySelectorAll('.vote-option').forEach(o=>o.classList.remove('selected'));const el=document.getElementById('vopt-'+id);if(el)el.classList.add('selected');}
+
+function submitVoteChoice(){if(!selectedVoteTarget){toast('Выбери игрока!');return;}myVoteSubmitted=true;socket.emit('game:vote',{targetId:selectedVoteTarget});const btn=document.querySelector('#vote-modal-bg .btn-primary');btn.disabled=true;btn.textContent='✓ Голос учтён';toast('Голос зарегистрирован',true);}
+
+function closeVoteModal(){document.getElementById('vote-modal-bg').style.display='none';}
+
+/* GUESS */
+function openGuessModal(){document.getElementById('guess-input').value='';document.getElementById('guess-modal-bg').style.display='flex';document.getElementById('guess-input').focus();}
+
+function submitGuess(){const word=document.getElementById('guess-input').value.trim();if(!word){toast('Введи слово!');return;}socket.emit('game:guessWord',{guess:word});closeGuessModal();}
+
+function closeGuessModal(){document.getElementById('guess-modal-bg').style.display='none';}
+
+function showEnd(data){document.getElementById('end-icon').textContent=data.winner==='traitor'?'🗡️':'🎉';document.getElementById('end-title').innerHTML=data.winner==='traitor'?'<span style="color:var(--accent)">Предатель!</span>':'<span style="color:var(--green)">Мирные!</span>';document.getElementById('end-desc').textContent='Слово: '+data.word;const sorted=[...data.players].sort((a,b)=>b.score-a.score);document.getElementById('end-scores').innerHTML=sorted.map((p,i)=>`<div class="score-row"><div><span style="color:var(--muted);">${i+1}.</span> ${p.name} ${p.id===data.traitorId?'<span class="tag tag-red">предатель</span>':''}</div><span class="score-points">${p.score}</span></div>`).join('');document.getElementById('btn-replay').style.display=me.isHost?'block':'none';showScreen('screen-end');}
+
+/* SOCKET EVENTS */
+socket.on('lobbies:changed',()=>{if(document.getElementById('screen-browser').classList.contains('active'))refreshBrowser();});
+
+socket.on('lobby:update',(state)=>{gameState=state;if(state.state==='waiting'){renderWaitingPlayers(state.players);}if(state.state==='playing'){renderGame(state);showScreen('screen-game');}});
+
+socket.on('reveal:nextPlayer',({name})=>{document.getElementById('reveal-whose-turn').textContent=name+', посмотри свою роль';document.getElementById('btn-show-role').style.display='flex';document.getElementById('btn-role-done').style.display='none';showScreen('screen-reveal');});
+
+socket.on('game:yourRole',(role)=>{myRole=role;document.getElementById('btn-show-role').style.display='flex';});
+
+socket.on('vote:progress',({voted,total})=>{});
+
+socket.on('vote:result',(data)=>{if(!data.correct){closeVoteModal();const elim=gameState.players?.find(p=>p.id===data.eliminatedId);toast('❌ '+elim?.name+' был игроком');}});
+
+socket.on('game:wordGuessed',(data)=>{if(!data.correct){toast('❌ Ошибка: '+gameState.secretWord);closeGuessModal();}});
+
+socket.on('game:end',showEnd);
+
+socket.on('host:promoted',()=>{me.isHost=true;toast('Ты ведущий!',true);});
+</script>
+</body>
+</html>
