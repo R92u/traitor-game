@@ -282,6 +282,7 @@ const socket = io();
 let me = {name:'',isHost:false,socketId:'',isTraitor:false,word:''};
 let lobbyCode = '';
 let myRole = null;
+let myHintLetter = ''; // PATCH 2: store hint letter for traitor
 let gameState = {state:'waiting',players:[],currentTurnIndex:0,round:1,traitorId:null,secretWord:'',maxTurns:3,voteUsed:false};
 let selectedVoteTarget = null;
 let myVoteSubmitted = false;
@@ -471,7 +472,18 @@ function renderGame(state){
   document.getElementById('game-badges').innerHTML=`<span class="tag tag-blue">Раунд ${state.round||1}</span><span class="tag tag-gold">${alive.length} в игре</span><span class="tag tag-green">Макс ходов: ${state.maxTurns||3}</span>${state.theme?`<span class="tag" style="background:rgba(76,201,240,.2);color:var(--accent2);border:1px solid var(--accent2);">📚 ${state.theme}</span>`:''}`;
   
   if(!me.isHost){
-    const curr=alive[state.currentTurnIndex%alive.length];
+    // Use turnOrder for current player
+    let orderedAlive=alive;
+    if(state.turnOrder && state.turnOrder.length>0){
+      const orderMap={};
+      state.turnOrder.forEach((id,idx)=>{orderMap[id]=idx;});
+      orderedAlive=[...alive].sort((a,b)=>{
+        const aIdx=orderMap[a.id]!==undefined?orderMap[a.id]:999;
+        const bIdx=orderMap[b.id]!==undefined?orderMap[b.id]:999;
+        return aIdx-bIdx;
+      });
+    }
+    const curr=orderedAlive[state.currentTurnIndex%orderedAlive.length];
     const ti=document.getElementById('current-turn-info');
     if(ti){ti.style.display=curr?'block':'none';if(curr)document.getElementById('game-current-turn').textContent=curr.name;}
   }
@@ -506,18 +518,30 @@ function renderGame(state){
 
 function renderPlayerTable(state){
   const participants=state.players.filter(p=>!p.isHost);
-  const alive=participants.filter(p=>p.alive);
+  
+  // PATCH 2: Sort participants according to turnOrder
+  let orderedParticipants=participants;
+  if(state.turnOrder && state.turnOrder.length>0){
+    const orderMap={};
+    state.turnOrder.forEach((id,idx)=>{orderMap[id]=idx;});
+    orderedParticipants=[...participants].sort((a,b)=>{
+      const aIdx=orderMap[a.id]!==undefined?orderMap[a.id]:999;
+      const bIdx=orderMap[b.id]!==undefined?orderMap[b.id]:999;
+      return aIdx-bIdx;
+    });
+  }
+  
+  const alive=orderedParticipants.filter(p=>p.alive);
   const curr=alive[state.currentTurnIndex%alive.length];
   const tableEl=document.getElementById('game-table');
   
-  const n=participants.length;
+  const n=orderedParticipants.length;
   const radius=200;
   const centerX=300, centerY=250;
   
   // PATCH 1: Theme visible to all in center
   const themeDisplay=state.theme?`<div style="font-size:.7rem;color:var(--accent2);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">📚 ${state.theme}</div>`:'';
   
-  // PATCH 2: Show word in center for non-traitors, ??? for traitor
   let centerContent='';
   if(me.isHost){
     centerContent=`${themeDisplay}<div class="table-word">${state.secretWord||'?'}</div><div class="table-center-text" style="margin-top:8px;">Ведущий</div>`;
@@ -531,7 +555,7 @@ function renderPlayerTable(state){
   
   let html=`<div class="table-circle">${centerContent}</div>`;
   
-  participants.forEach((p,i)=>{
+  orderedParticipants.forEach((p,i)=>{
     const angle=(i/n)*2*Math.PI-Math.PI/2;
     const x=centerX+radius*Math.cos(angle);
     const y=centerY+radius*Math.sin(angle);
@@ -553,8 +577,8 @@ function renderPlayerTable(state){
     const isTraitor=p.id===gameState.traitorId;
     const turnsLeft=Math.max(0,(state.maxTurns||3)-(p.turnsUsed||0));
     
-    // PATCH 3: Show hint button for traitor (only once per round)
     const showHintBtn = isMe && myRole?.isTraitor && !state.hintUsed;
+    const showHintLetter = isMe && myRole?.isTraitor && myHintLetter;
     
     html+=`<div class="player-seat ${isCurr?'current':''}" style="left:${x}px;top:${y}px;">
       <svg width="55" height="70" viewBox="0 0 60 80">
@@ -569,6 +593,7 @@ function renderPlayerTable(state){
       <div class="player-seat-name">${p.name}</div>
       <div class="role-indicator">${isMe&&myRole?(myRole.isTraitor?'🗡️':'👁️'):''}</div>
       <div class="turns-counter">🔄 ${turnsLeft}/${state.maxTurns||3}</div>
+      ${showHintLetter?`<div style="background:rgba(255,209,102,.15);border:2px solid var(--gold);border-radius:8px;padding:4px 10px;font-family:'Unbounded',sans-serif;font-size:1.2rem;font-weight:900;color:var(--gold);box-shadow:0 0 12px rgba(255,209,102,.3);">💡 ${myHintLetter}</div>`:''}
       ${isMe?`<button class="btn btn-green" onclick="endMyTurn()">✓ Закончить ход</button>${isTraitor&&myRole?.isTraitor?'<button class="btn btn-primary" onclick="startGuessing()">🎯 Угадать</button>':''}${showHintBtn?'<button class="btn btn-secondary" style="background:rgba(76,201,240,.15);color:var(--accent2);border-color:var(--accent2);" onclick="useHint()">💡 Подсказка</button>':''}`:''}
     </div>`;
   });
@@ -826,6 +851,7 @@ socket.on('game:end',showEnd);
 // PATCH 5: Back to lobby
 socket.on('game:backToLobby',()=>{
   myRole=null;
+  myHintLetter=''; // reset hint
   closeVoteModal();
   closeGuessInputModal();
   closeGuessLiveScreen();
@@ -837,6 +863,7 @@ socket.on('host:promoted',()=>{me.isHost=true;toast('Ты ведущий!',true)
 
 // PATCH 3: Hint received (only traitor gets this)
 socket.on('game:hintReceived',({firstLetter})=>{
+  myHintLetter=firstLetter; // store for later display
   showHintModal(firstLetter);
 });
 </script>

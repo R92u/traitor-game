@@ -21,12 +21,13 @@ function makeLobby(hostName, hostSocketId) {
     hostId: hostSocketId,
     hostName,
     word: '',
-    theme: '',              // PATCH 1: theme for the round (visible to all)
+    theme: '',
     traitorId: null,
     state: 'waiting',
     players: [],
     revealQueue: [],
     revealIndex: 0,
+    turnOrder: [],          // PATCH: separate turn order for the game
     currentTurnIndex: 0,
     round: 1,
     maxTurns: 3,
@@ -38,7 +39,8 @@ function makeLobby(hostName, hostSocketId) {
     guessing: false,
     guessText: '',
     rolesSeen: {},
-    hintUsed: false,        // PATCH 3: traitor hint used this round
+    hintUsed: false,
+    hintLetter: '',         // PATCH 2: store hint letter so traitor can see it again
     createdAt: Date.now(),
   };
 }
@@ -62,16 +64,17 @@ function broadcast(lobby) {
     hostName: lobby.hostName,
     state: lobby.state,
     players: playerList(lobby),
+    turnOrder: lobby.turnOrder ? lobby.turnOrder.map(p => p.id) : [], // PATCH: send turn order IDs
     currentTurnIndex: lobby.currentTurnIndex,
     round: lobby.round,
     traitorId: lobby.traitorId,
     secretWord: lobby.word,
-    theme: lobby.theme,             // PATCH 1
+    theme: lobby.theme,
     maxTurns: lobby.maxTurns,
     voteUsed: lobby.voteUsed,
     guessing: lobby.guessing,
     guessText: lobby.guessText,
-    hintUsed: lobby.hintUsed,       // PATCH 3
+    hintUsed: lobby.hintUsed,
     currentRevealId: currentReveal?.socketId || null,
     currentRevealName: currentReveal?.name || null,
     revealIndex: lobby.revealIndex,
@@ -267,8 +270,12 @@ io.on('connection', (socket) => {
     lobby.maxTurns = parseInt(maxTurns) || 3;
     lobby.state = 'revealing';
     
-    // PATCH 2: Weighted shuffle - traitor has lower chance to go first
-    lobby.revealQueue = weightedShuffle([...gameParticipants], traitorId);
+    // Reveal order - simple random shuffle
+    lobby.revealQueue = shuffle([...gameParticipants]);
+    
+    // PATCH 2: Turn order - weighted shuffle so traitor less likely to go first
+    lobby.turnOrder = weightedShuffle([...gameParticipants], traitorId);
+    console.log('Turn order:', lobby.turnOrder.map(p => p.name + (p.id===traitorId?' (TRAITOR)':'')));
     
     lobby.revealIndex = 0;
     lobby.currentTurnIndex = 0;
@@ -280,6 +287,7 @@ io.on('connection', (socket) => {
     lobby.guessText = '';
     lobby.rolesSeen = {};
     lobby.hintUsed = false;
+    lobby.hintLetter = '';
     lobby.players.forEach(p => { p.alive = true; });
 
     cb?.({ ok: true });
@@ -313,15 +321,19 @@ io.on('connection', (socket) => {
     }
   });
 
-  // PATCH 1: Next turn with turn counting
+  // PATCH 1: Next turn with turn counting (uses turnOrder)
   socket.on('game:nextTurn', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'playing') return;
     
-    const participants = getGameParticipants(lobby).filter(p => p.alive);
-    if (participants.length === 0) return;
+    // Use saved turnOrder, filter to alive only
+    const aliveTurnOrder = lobby.turnOrder.filter(p => {
+      const player = lobby.players.find(pp => pp.id === p.id);
+      return player && player.alive;
+    });
+    if (aliveTurnOrder.length === 0) return;
     
-    const curr = participants[lobby.currentTurnIndex % participants.length];
+    const curr = aliveTurnOrder[lobby.currentTurnIndex % aliveTurnOrder.length];
     
     if (socket.id !== lobby.hostId && socket.id !== curr?.socketId) return;
     
@@ -332,7 +344,6 @@ io.on('connection', (socket) => {
     
     // Check if all turns are used
     if (checkAllTurnsUsed(lobby)) {
-      // PATCH 1: All turns used - traitor wins by default
       const traitor = lobby.players.find(p => p.id === lobby.traitorId);
       if (traitor) traitor.score += 2;
       lobby.state = 'ended';
@@ -349,14 +360,14 @@ io.on('connection', (socket) => {
     }
     
     // Move to next player who still has turns
-    let nextIndex = (lobby.currentTurnIndex + 1) % participants.length;
+    let nextIndex = (lobby.currentTurnIndex + 1) % aliveTurnOrder.length;
     let attempts = 0;
-    while (attempts < participants.length) {
-      const nextPlayer = participants[nextIndex];
+    while (attempts < aliveTurnOrder.length) {
+      const nextPlayer = aliveTurnOrder[nextIndex];
       if ((lobby.turnsUsed[nextPlayer.socketId] || 0) < lobby.maxTurns) {
         break;
       }
-      nextIndex = (nextIndex + 1) % participants.length;
+      nextIndex = (nextIndex + 1) % aliveTurnOrder.length;
       attempts++;
     }
     
@@ -411,10 +422,11 @@ io.on('connection', (socket) => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'playing') return;
     if (socket.id !== lobby.traitorId) return;
-    if (lobby.hintUsed) return; // already used
+    if (lobby.hintUsed) return;
     
     lobby.hintUsed = true;
     const firstLetter = lobby.word.charAt(0).toUpperCase();
+    lobby.hintLetter = firstLetter;  // PATCH 2: store letter
     
     // Send hint only to traitor
     io.to(socket.id).emit('game:hintReceived', {
