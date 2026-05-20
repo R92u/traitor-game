@@ -43,6 +43,7 @@ function makeLobby(hostName, hostSocketId) {
 function playerList(lobby) {
   return lobby.players.map(p => ({
     id: p.id,
+    socketId: p.socketId,
     name: p.name,
     score: p.score,
     alive: p.alive,
@@ -52,6 +53,7 @@ function playerList(lobby) {
 }
 
 function broadcast(lobby) {
+  const currentReveal = lobby.revealQueue && lobby.revealQueue[lobby.revealIndex];
   io.to(lobby.code).emit('lobby:update', {
     code: lobby.code,
     hostName: lobby.hostName,
@@ -65,6 +67,12 @@ function broadcast(lobby) {
     voteUsed: lobby.voteUsed,
     guessing: lobby.guessing,
     guessText: lobby.guessText,
+    // For reveal phase
+    currentRevealId: currentReveal?.socketId || null,
+    currentRevealName: currentReveal?.name || null,
+    revealIndex: lobby.revealIndex,
+    revealTotal: lobby.revealQueue?.length || 0,
+    rolesSeen: lobby.rolesSeen || {},
   });
 }
 
@@ -242,6 +250,7 @@ io.on('connection', (socket) => {
     lobby.voteUsed = false;
     lobby.guessing = false;
     lobby.guessText = '';
+    lobby.rolesSeen = {};
     lobby.players.forEach(p => { p.alive = true; });
 
     cb?.({ ok: true });
@@ -253,6 +262,18 @@ io.on('connection', (socket) => {
   socket.on('game:roleSeen', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'revealing') return;
+    
+    // BUG FIX: Only the current player in queue can confirm
+    const currentRevealPlayer = lobby.revealQueue[lobby.revealIndex];
+    if (!currentRevealPlayer || currentRevealPlayer.socketId !== socket.id) {
+      console.log('Wrong player trying to confirm role');
+      return;
+    }
+    
+    // Mark as seen
+    if (!lobby.rolesSeen) lobby.rolesSeen = {};
+    lobby.rolesSeen[socket.id] = true;
+    
     lobby.revealIndex++;
     if (lobby.revealIndex >= lobby.revealQueue.length) {
       lobby.state = 'playing';
@@ -333,10 +354,17 @@ io.on('connection', (socket) => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'voting') return;
     if (socket.id === lobby.hostId) return;
+    // BUG FIX: Traitor can't vote
+    if (socket.id === lobby.traitorId) return;
     
     lobby.votes[socket.id] = targetId;
 
-    const voters = lobby.players.filter(p => p.alive && p.socketId !== lobby.hostId);
+    // Voters = alive players, not host, not traitor
+    const voters = lobby.players.filter(p => 
+      p.alive && 
+      p.socketId !== lobby.hostId && 
+      p.id !== lobby.traitorId
+    );
     const voteCount = Object.keys(lobby.votes).length;
 
     io.to(lobby.code).emit('vote:progress', {
@@ -344,7 +372,6 @@ io.on('connection', (socket) => {
       total: voters.length,
     });
 
-    // If everyone voted, resolve early
     if (voteCount >= voters.length) {
       resolveVote(lobby);
     }

@@ -171,8 +171,13 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
 
 <!-- REVEAL -->
 <div id="screen-reveal" class="screen center">
-  <div class="wrap flex-col center gap-l" style="padding-top:30px;">
-    <div><h2 style="text-align:center;">Раздача ролей</h2><p class="subtitle mt-s" id="reveal-whose-turn" style="text-align:center;font-size:.95rem;"></p></div>
+  <div class="wrap flex-col center gap-l" style="padding-top:30px;width:100%;max-width:700px;">
+    <div><h2 style="text-align:center;">Раздача ролей</h2><p class="subtitle mt-s" id="reveal-whose-turn" style="text-align:center;font-size:.95rem;font-weight:700;"></p></div>
+    
+    <!-- Table showing all players and their status -->
+    <div id="reveal-table" style="position:relative;width:100%;max-width:500px;height:400px;margin:10px auto;"></div>
+    
+    <!-- Role card (only visible when it's your turn) -->
     <div id="role-card-wrap" style="width:100%;display:flex;justify-content:center;">
       <div id="role-card" class="role-reveal innocent" style="opacity:0;">
         <div class="role-icon" id="role-icon">👁️</div>
@@ -347,8 +352,14 @@ function renderWaitingPlayers(players){
 }
 
 /* REVEAL */
+let canViewRole = false;
+let alreadyViewedRole = false;
+
 function showMyRole(){
   if(!myRole)return;
+  if(!canViewRole){toast('Сейчас не твоя очередь!');return;}
+  if(alreadyViewedRole){toast('Ты уже посмотрел свою роль!');return;}
+  
   const card=document.getElementById('role-card');
   const {isTraitor,word}=myRole;
   card.className='role-reveal '+(isTraitor?'traitor':'innocent');
@@ -362,7 +373,90 @@ function showMyRole(){
   document.getElementById('btn-role-done').style.display='flex';
 }
 
-function roleSeen(){socket.emit('game:roleSeen');}
+function roleSeen(){
+  if(!canViewRole)return;
+  alreadyViewedRole=true;
+  canViewRole=false;
+  socket.emit('game:roleSeen');
+  // Hide the card and show waiting state
+  document.getElementById('role-card').style.opacity='0';
+  document.getElementById('btn-show-role').style.display='none';
+  document.getElementById('btn-role-done').style.display='none';
+}
+
+// Render the reveal screen with table showing who's done
+function renderRevealScreen(state){
+  const currentRevealId=state.currentRevealId;
+  const currentRevealName=state.currentRevealName;
+  const rolesSeen=state.rolesSeen||{};
+  
+  // PATCH: Show table with players who already saw their role
+  const participants=state.players.filter(p=>!p.isHost);
+  
+  // Build table view
+  const tableContainer=document.getElementById('reveal-table');
+  if(tableContainer){
+    const n=participants.length;
+    const radius=170;
+    const centerX=250, centerY=200;
+    
+    let html=`<div class="table-circle" style="width:220px;height:220px;">
+      <div class="table-center-text" style="font-size:.8rem;">
+        ${currentRevealName ? '<strong style="color:var(--gold);">'+currentRevealName+'</strong><br>смотрит роль...' : 'Все посмотрели!'}
+      </div>
+    </div>`;
+    
+    participants.forEach((p,i)=>{
+      const angle=(i/n)*2*Math.PI-Math.PI/2;
+      const x=centerX+radius*Math.cos(angle);
+      const y=centerY+radius*Math.sin(angle);
+      const hasSeen=rolesSeen[p.socketId||p.id];
+      const isCurrent=p.socketId===currentRevealId || p.id===currentRevealId;
+      
+      // Find socketId for this player
+      const playerSocketId=p.socketId||p.id;
+      const seen=rolesSeen[playerSocketId];
+      
+      html+=`<div class="player-seat" style="left:${x}px;top:${y}px;opacity:${seen?'1':'0.4'};">
+        <svg width="50" height="65" viewBox="0 0 60 80">
+          <circle cx="30" cy="15" r="12" fill="${color(p.id)}" stroke="${seen?'var(--green)':'var(--text)'}" stroke-width="${seen?'2':'1.5'}"/>
+          <rect x="20" y="30" width="20" height="25" rx="6" fill="${color(p.id)}" stroke="${seen?'var(--green)':'var(--text)'}" stroke-width="${seen?'2':'1.5'}"/>
+        </svg>
+        <div class="player-seat-name" style="font-size:.75rem;">${p.name}</div>
+        <div style="font-size:.65rem;color:${seen?'var(--green)':'var(--muted)'};">
+          ${seen?'✓ готов':isCurrent?'🔍 смотрит':'⏳ ждёт'}
+        </div>
+      </div>`;
+    });
+    
+    tableContainer.innerHTML=html;
+  }
+  
+  // Update message about whose turn it is
+  const msgEl=document.getElementById('reveal-whose-turn');
+  if(msgEl){
+    if(currentRevealId===me.socketId){
+      msgEl.textContent='Твоя очередь! Посмотри роль';
+      msgEl.style.color='var(--gold)';
+      canViewRole=true;
+      // Show the button if not already viewed
+      if(!alreadyViewedRole){
+        document.getElementById('btn-show-role').style.display='flex';
+        document.getElementById('btn-role-done').style.display='none';
+      }
+    }else{
+      if(alreadyViewedRole){
+        msgEl.textContent='Ты уже посмотрел. Ждём остальных...';
+      }else{
+        msgEl.textContent=(currentRevealName||'Игрок')+' смотрит свою роль...';
+      }
+      msgEl.style.color='var(--muted)';
+      canViewRole=false;
+      document.getElementById('btn-show-role').style.display='none';
+      document.getElementById('btn-role-done').style.display='none';
+    }
+  }
+}
 
 /* GAME */
 function renderGame(state){
@@ -634,6 +728,15 @@ socket.on('lobby:update',(state)=>{
   gameState=state;
   if(state.state==='waiting'){
     renderWaitingPlayers(state.players);
+    // Reset reveal flags
+    alreadyViewedRole=false;
+    canViewRole=false;
+  }
+  if(state.state==='revealing'){
+    renderRevealScreen(state);
+    if(!document.getElementById('screen-reveal').classList.contains('active')){
+      showScreen('screen-reveal');
+    }
   }
   if(state.state==='playing'){
     renderGame(state);
@@ -651,15 +754,12 @@ socket.on('lobby:update',(state)=>{
 });
 
 socket.on('reveal:nextPlayer',({name})=>{
-  document.getElementById('reveal-whose-turn').textContent=name+', посмотри свою роль';
-  document.getElementById('btn-show-role').style.display='flex';
-  document.getElementById('btn-role-done').style.display='none';
-  showScreen('screen-reveal');
+  // Now handled by lobby:update with currentRevealId
 });
 
 socket.on('game:yourRole',(role)=>{
   myRole=role;
-  document.getElementById('btn-show-role').style.display='flex';
+  // Don't auto-show button - wait for lobby:update to check if it's my turn
 });
 
 // PATCH 3: Vote started
