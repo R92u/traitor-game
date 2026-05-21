@@ -2,6 +2,8 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,272 +13,284 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── STATE ──────────────────────────────────────────
+// ─── ACCOUNTS ───────────────────────────────────────
+const ACCOUNTS_FILE = path.join(__dirname, 'accounts.json');
+let accounts = {};
+
+function loadAccounts() {
+  try {
+    if (fs.existsSync(ACCOUNTS_FILE)) {
+      accounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
+      console.log(`Loaded ${Object.keys(accounts).length} accounts`);
+    }
+  } catch (e) { console.error('Load accounts:', e); accounts = {}; }
+}
+function saveAccounts() {
+  try { fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2)); }
+  catch (e) { console.error('Save accounts:', e); }
+}
+function hashPassword(p) {
+  return crypto.createHash('sha256').update(p + 'spy_salt_2024').digest('hex');
+}
+loadAccounts();
+
+// ─── CLASSES ────────────────────────────────────────
+const CLASSES = {
+  'default':       { id:'default',       name:'Обычный',  icon:'🕵️', desc:'Узнать первую букву слова',                price:0,    ability:'hint' },
+  'gambler':       { id:'gambler',       name:'Лудотряс', icon:'🎰', desc:'Узнать случайную букву и её номер',         price:1000, ability:'random_letter' },
+  'fortune_teller':{ id:'fortune_teller',name:'Гадалка',  icon:'🔮', desc:'Узнать количество букв в слове',            price:1200, ability:'letter_count' },
+  'mellstroy':     { id:'mellstroy',     name:'Меллстрой',icon:'💰', desc:'Рулетка! 777 = первая и последняя буквы',   price:2000, ability:'roulette' },
+};
+
+const REWARDS = { spy_win: 250, civilian_win: 100 };
+
+// ─── LOBBIES ────────────────────────────────────────
 const lobbies = {};
 
-function makeLobby(hostName, hostSocketId) {
-  const code = Math.random().toString(36).slice(2,7).toUpperCase();
+function makeLobby(hostName, hostSocketId, hostUsername) {
   return {
-    code,
+    code: Math.random().toString(36).slice(2,7).toUpperCase(),
     hostId: hostSocketId,
-    hostName,
-    word: '',
-    theme: '',
-    traitorId: null,
+    hostName, hostUsername,
+    word: '', theme: '',
+    spyId: null, spyClass: 'default',
     state: 'waiting',
     players: [],
-    revealQueue: [],
-    revealIndex: 0,
-    turnOrder: [],          // PATCH: separate turn order for the game
-    currentTurnIndex: 0,
-    round: 1,
-    maxTurns: 3,
+    revealQueue: [], revealIndex: 0,
+    turnOrder: [], currentTurnIndex: 0,
+    round: 1, maxTurns: 3,
     turnsUsed: {},
-    votes: {},
-    voteUsed: false,
-    voteTimer: null,
-    voteEndTime: null,
-    guessing: false,
-    guessText: '',
+    votes: {}, voteUsed: false, voteTimer: null, voteEndTime: null,
+    guessing: false, guessText: '',
     rolesSeen: {},
-    hintUsed: false,
-    hintLetter: '',         // PATCH 2: store hint letter so traitor can see it again
+    abilityUsed: false, abilityResult: null,
     createdAt: Date.now(),
   };
 }
 
 function playerList(lobby) {
   return lobby.players.map(p => ({
-    id: p.id,
-    socketId: p.socketId,
-    name: p.name,
-    score: p.score,
-    alive: p.alive,
+    id: p.id, socketId: p.socketId, name: p.name,
+    username: p.username, score: p.score, alive: p.alive,
     isHost: p.socketId === lobby.hostId,
     turnsUsed: lobby.turnsUsed[p.socketId] || 0,
   }));
 }
 
 function broadcast(lobby) {
-  const currentReveal = lobby.revealQueue && lobby.revealQueue[lobby.revealIndex];
+  const cr = lobby.revealQueue && lobby.revealQueue[lobby.revealIndex];
   io.to(lobby.code).emit('lobby:update', {
-    code: lobby.code,
-    hostName: lobby.hostName,
-    state: lobby.state,
-    players: playerList(lobby),
-    turnOrder: lobby.turnOrder ? lobby.turnOrder.map(p => p.id) : [], // PATCH: send turn order IDs
-    currentTurnIndex: lobby.currentTurnIndex,
-    round: lobby.round,
-    traitorId: lobby.traitorId,
-    secretWord: lobby.word,
-    theme: lobby.theme,
+    code: lobby.code, hostName: lobby.hostName,
+    state: lobby.state, players: playerList(lobby),
+    turnOrder: lobby.turnOrder ? lobby.turnOrder.map(p => p.id) : [],
+    currentTurnIndex: lobby.currentTurnIndex, round: lobby.round,
+    spyId: lobby.spyId, spyClass: lobby.spyClass,
+    secretWord: lobby.word, theme: lobby.theme,
     maxTurns: lobby.maxTurns,
     voteUsed: lobby.voteUsed,
-    guessing: lobby.guessing,
-    guessText: lobby.guessText,
-    hintUsed: lobby.hintUsed,
-    currentRevealId: currentReveal?.socketId || null,
-    currentRevealName: currentReveal?.name || null,
-    revealIndex: lobby.revealIndex,
-    revealTotal: lobby.revealQueue?.length || 0,
+    guessing: lobby.guessing, guessText: lobby.guessText,
+    abilityUsed: lobby.abilityUsed,
+    currentRevealId: cr?.socketId || null,
+    currentRevealName: cr?.name || null,
     rolesSeen: lobby.rolesSeen || {},
   });
 }
 
-function cleanupOldLobbies() {
-  const cutoff = Date.now() - 3 * 60 * 60 * 1000;
+setInterval(() => {
+  const cutoff = Date.now() - 3*60*60*1000;
   for (const code of Object.keys(lobbies)) {
     if (lobbies[code].createdAt < cutoff) delete lobbies[code];
   }
-}
-setInterval(cleanupOldLobbies, 30 * 60 * 1000);
+}, 30*60*1000);
 
 // ─── HELPERS ────────────────────────────────────────
 function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
+  for (let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[arr[i],arr[j]]=[arr[j],arr[i]];}
   return arr;
 }
-
-// PATCH 2: Weighted shuffle - traitor much less likely to be first
-function weightedShuffle(arr, traitorId) {
-  // First, do normal shuffle
-  const shuffled = shuffle([...arr]);
-  
-  // If traitor ended up in first position, with high probability swap them
-  // Effectively reducing traitor's chance of going first to ~15-20%
-  if (shuffled[0]?.id === traitorId && shuffled.length > 1) {
-    // 80% chance to move traitor away from position 0
-    if (Math.random() < 0.8) {
-      // Move traitor to a random non-first position
-      const traitor = shuffled.shift();
-      const newPos = 1 + Math.floor(Math.random() * shuffled.length);
-      shuffled.splice(newPos, 0, traitor);
-    }
+function weightedShuffle(arr, spyId) {
+  const s = shuffle([...arr]);
+  if (s[0]?.id === spyId && s.length > 1 && Math.random() < 0.8) {
+    const spy = s.shift();
+    s.splice(1 + Math.floor(Math.random()*s.length), 0, spy);
   }
-  
-  return shuffled;
+  return s;
 }
-
 function advanceReveal(lobby) {
   const p = lobby.revealQueue[lobby.revealIndex];
   if (!p) return;
-  const isTraitor = p.id === lobby.traitorId;
+  const isSpy = p.id === lobby.spyId;
   io.to(p.socketId).emit('game:yourRole', {
-    isTraitor,
-    word: isTraitor ? null : lobby.word,
-    playerIndex: lobby.revealIndex,
-    totalPlayers: lobby.revealQueue.length,
+    isSpy, word: isSpy ? null : lobby.word,
+    spyClass: isSpy ? lobby.spyClass : null,
   });
   io.to(lobby.code).emit('reveal:nextPlayer', { name: p.name });
 }
-
-function getGameParticipants(lobby) {
+function getParticipants(lobby) {
   return lobby.players.filter(p => p.socketId !== lobby.hostId);
 }
-
-function checkAllTurnsUsed(lobby) {
-  const participants = getGameParticipants(lobby).filter(p => p.alive);
-  return participants.every(p => (lobby.turnsUsed[p.socketId] || 0) >= lobby.maxTurns);
+function allTurnsUsed(lobby) {
+  return getParticipants(lobby).filter(p => p.alive)
+    .every(p => (lobby.turnsUsed[p.socketId] || 0) >= lobby.maxTurns);
 }
-
-// PATCH 3: 30-second vote timer
 function startVoteTimer(lobby) {
   if (lobby.voteTimer) clearTimeout(lobby.voteTimer);
   lobby.voteEndTime = Date.now() + 30000;
-  
-  io.to(lobby.code).emit('vote:started', {
-    endTime: lobby.voteEndTime,
-  });
-  
-  lobby.voteTimer = setTimeout(() => {
-    resolveVote(lobby);
-  }, 30000);
+  io.to(lobby.code).emit('vote:started', { endTime: lobby.voteEndTime });
+  lobby.voteTimer = setTimeout(() => resolveVote(lobby), 30000);
 }
-
+function awardCoins(lobby, winner) {
+  lobby.players.forEach(p => {
+    if (!p.username || p.socketId === lobby.hostId) return;
+    const acc = accounts[p.username];
+    if (!acc) return;
+    if (winner === 'spy' && p.id === lobby.spyId) acc.coins += REWARDS.spy_win;
+    else if (winner === 'civilians' && p.id !== lobby.spyId) acc.coins += REWARDS.civilian_win;
+  });
+  saveAccounts();
+  lobby.players.forEach(p => {
+    if (p.username && accounts[p.username]) {
+      io.to(p.socketId).emit('account:update', {
+        coins: accounts[p.username].coins,
+        inventory: accounts[p.username].inventory,
+        equippedClass: accounts[p.username].equippedClass,
+      });
+    }
+  });
+}
 function resolveVote(lobby) {
-  if (lobby.voteTimer) {
-    clearTimeout(lobby.voteTimer);
-    lobby.voteTimer = null;
-  }
-  
+  if (lobby.voteTimer) { clearTimeout(lobby.voteTimer); lobby.voteTimer = null; }
   const tally = {};
-  for (const targetId of Object.values(lobby.votes)) {
-    tally[targetId] = (tally[targetId] || 0) + 1;
-  }
-  
-  let maxVotes = 0, eliminatedId = null;
-  for (const [id, count] of Object.entries(tally)) {
-    if (count > maxVotes) { maxVotes = count; eliminatedId = id; }
-  }
-
-  const isCorrect = eliminatedId === lobby.traitorId;
-  
-  // PATCH 3: Game ends after vote regardless
+  for (const t of Object.values(lobby.votes)) tally[t] = (tally[t]||0)+1;
+  let max=0, elimId=null;
+  for (const [id,c] of Object.entries(tally)) if (c > max) { max=c; elimId=id; }
+  const correct = elimId === lobby.spyId;
   lobby.state = 'ended';
-  
-  if (isCorrect) {
-    // Players win
-    lobby.players.forEach(p => { 
-      if (p.id !== lobby.traitorId && p.socketId !== lobby.hostId) p.score++; 
-    });
-    io.to(lobby.code).emit('vote:result', { correct: true, eliminatedId, tally, word: lobby.word });
-    io.to(lobby.code).emit('game:end', {
-      winner: 'players',
-      reason: 'vote',
-      word: lobby.word,
-      traitorId: lobby.traitorId,
-      players: playerList(lobby),
-    });
+  if (correct) {
+    lobby.players.forEach(p => { if (p.id !== lobby.spyId && p.socketId !== lobby.hostId) p.score++; });
+    awardCoins(lobby, 'civilians');
+    io.to(lobby.code).emit('vote:result', { correct:true, eliminatedId:elimId, tally, word:lobby.word });
+    io.to(lobby.code).emit('game:end', { winner:'civilians', reason:'vote', word:lobby.word, spyId:lobby.spyId, players:playerList(lobby) });
   } else {
-    // Traitor wins
-    const traitor = lobby.players.find(p => p.id === lobby.traitorId);
-    if (traitor) traitor.score += 2;
-    io.to(lobby.code).emit('vote:result', { correct: false, eliminatedId, tally, word: lobby.word });
-    io.to(lobby.code).emit('game:end', {
-      winner: 'traitor',
-      reason: 'vote',
-      word: lobby.word,
-      traitorId: lobby.traitorId,
-      players: playerList(lobby),
-    });
+    const spy = lobby.players.find(p => p.id === lobby.spyId);
+    if (spy) spy.score += 2;
+    awardCoins(lobby, 'spy');
+    io.to(lobby.code).emit('vote:result', { correct:false, eliminatedId:elimId, tally, word:lobby.word });
+    io.to(lobby.code).emit('game:end', { winner:'spy', reason:'vote', word:lobby.word, spyId:lobby.spyId, players:playerList(lobby) });
   }
-  
   broadcast(lobby);
   io.emit('lobbies:changed');
 }
 
-// ─── SOCKET EVENTS ──────────────────────────────────
+// ─── SOCKET ─────────────────────────────────────────
 io.on('connection', (socket) => {
   console.log('+ connect', socket.id);
 
+  // ACCOUNTS
+  socket.on('account:register', ({ username, password }, cb) => {
+    if (!username || !password) return cb({ ok:false, error:'Заполни поля' });
+    if (username.length < 3) return cb({ ok:false, error:'Логин минимум 3 символа' });
+    if (password.length < 4) return cb({ ok:false, error:'Пароль минимум 4 символа' });
+    if (accounts[username]) return cb({ ok:false, error:'Логин занят' });
+    accounts[username] = {
+      passwordHash: hashPassword(password),
+      coins: 0, inventory: ['default'], equippedClass: 'default',
+      createdAt: Date.now(),
+    };
+    saveAccounts();
+    socket.data.username = username;
+    cb({ ok:true, account:{ username, coins:0, inventory:['default'], equippedClass:'default' } });
+  });
+
+  socket.on('account:login', ({ username, password }, cb) => {
+    const acc = accounts[username];
+    if (!acc) return cb({ ok:false, error:'Аккаунт не найден' });
+    if (acc.passwordHash !== hashPassword(password)) return cb({ ok:false, error:'Неверный пароль' });
+    socket.data.username = username;
+    cb({ ok:true, account:{ username, coins:acc.coins, inventory:acc.inventory, equippedClass:acc.equippedClass } });
+  });
+
+  socket.on('account:buyClass', ({ classId }, cb) => {
+    const u = socket.data.username;
+    if (!u) return cb({ ok:false, error:'Войди в аккаунт' });
+    const acc = accounts[u];
+    if (!acc) return cb({ ok:false, error:'Аккаунт не найден' });
+    const cls = CLASSES[classId];
+    if (!cls) return cb({ ok:false, error:'Класс не найден' });
+    if (acc.inventory.includes(classId)) return cb({ ok:false, error:'Уже куплен' });
+    if (acc.coins < cls.price) return cb({ ok:false, error:'Не хватает монет' });
+    acc.coins -= cls.price;
+    acc.inventory.push(classId);
+    saveAccounts();
+    cb({ ok:true, account:{ username:u, coins:acc.coins, inventory:acc.inventory, equippedClass:acc.equippedClass } });
+  });
+
+  socket.on('account:equipClass', ({ classId }, cb) => {
+    const u = socket.data.username;
+    if (!u) return cb({ ok:false, error:'Войди в аккаунт' });
+    const acc = accounts[u];
+    if (!acc) return cb({ ok:false, error:'Аккаунт не найден' });
+    if (!acc.inventory.includes(classId)) return cb({ ok:false, error:'Класс не куплен' });
+    acc.equippedClass = classId;
+    saveAccounts();
+    cb({ ok:true, account:{ username:u, coins:acc.coins, inventory:acc.inventory, equippedClass:acc.equippedClass } });
+  });
+
+  // LOBBY
   socket.on('lobbies:list', (cb) => {
-    const list = Object.values(lobbies)
-      .filter(l => l.state === 'waiting')
-      .map(l => ({
-        code: l.code,
-        hostName: l.hostName,
-        state: l.state,
-        playerCount: l.players.length,
-      }));
-    cb({ lobbies: list });
+    cb({ lobbies: Object.values(lobbies).filter(l => l.state==='waiting').map(l => ({
+      code:l.code, hostName:l.hostName, state:l.state, playerCount:l.players.length,
+    })) });
   });
 
   socket.on('lobby:create', ({ name }, cb) => {
-    const lobby = makeLobby(name, socket.id);
+    const lobby = makeLobby(name, socket.id, socket.data.username);
     lobbies[lobby.code] = lobby;
-    const me = { id: socket.id, name, socketId: socket.id, score: 0, alive: true };
-    lobby.players.push(me);
+    lobby.players.push({ id:socket.id, name, socketId:socket.id, username:socket.data.username, score:0, alive:true });
     socket.join(lobby.code);
     socket.data.lobbyCode = lobby.code;
     socket.data.name = name;
-    cb({ ok: true, code: lobby.code, isHost: true });
+    cb({ ok:true, code:lobby.code, isHost:true });
     broadcast(lobby);
     io.emit('lobbies:changed');
   });
 
   socket.on('lobby:join', ({ code, name }, cb) => {
     const lobby = lobbies[code?.toUpperCase()];
-    if (!lobby) return cb({ ok: false, error: 'Лобби не найдено' });
-    if (lobby.state !== 'waiting') return cb({ ok: false, error: 'Игра уже началась' });
-    if (lobby.players.find(p => p.name.toLowerCase() === name.toLowerCase()))
-      return cb({ ok: false, error: 'Имя занято' });
-
-    const me = { id: socket.id, name, socketId: socket.id, score: 0, alive: true };
-    lobby.players.push(me);
+    if (!lobby) return cb({ ok:false, error:'Лобби не найдено' });
+    if (lobby.state !== 'waiting') return cb({ ok:false, error:'Игра уже идёт' });
+    if (lobby.players.find(p => p.name.toLowerCase()===name.toLowerCase())) return cb({ ok:false, error:'Имя занято' });
+    lobby.players.push({ id:socket.id, name, socketId:socket.id, username:socket.data.username, score:0, alive:true });
     socket.join(lobby.code);
     socket.data.lobbyCode = code.toUpperCase();
     socket.data.name = name;
-    cb({ ok: true, code: lobby.code, isHost: false });
+    cb({ ok:true, code:lobby.code, isHost:false });
     broadcast(lobby);
     io.emit('lobbies:changed');
   });
 
-  // PATCH 1: Accept theme. PATCH 2: Weighted shuffle for traitor.
   socket.on('game:start', ({ word, traitorId, maxTurns, theme }, cb) => {
     const lobby = lobbies[socket.data.lobbyCode];
-    if (!lobby || socket.id !== lobby.hostId) return cb?.({ ok: false });
-    if (!word) return cb?.({ ok: false, error: 'Введи слово' });
-    if (!traitorId) return cb?.({ ok: false, error: 'Выбери предателя' });
-    
-    const gameParticipants = lobby.players.filter(p => p.socketId !== lobby.hostId);
-    if (gameParticipants.length < 2) return cb?.({ ok: false, error: 'Минимум 2 игрока (не считая ведущего)' });
+    if (!lobby || socket.id !== lobby.hostId) return cb?.({ ok:false });
+    if (!word) return cb?.({ ok:false, error:'Введи слово' });
+    if (!traitorId) return cb?.({ ok:false, error:'Выбери шпиона' });
+    const parts = lobby.players.filter(p => p.socketId !== lobby.hostId);
+    if (parts.length < 2) return cb?.({ ok:false, error:'Минимум 2 игрока' });
+
+    const spyPlayer = lobby.players.find(p => p.id === traitorId);
+    let spyClass = 'default';
+    if (spyPlayer?.username && accounts[spyPlayer.username]) {
+      spyClass = accounts[spyPlayer.username].equippedClass || 'default';
+    }
 
     lobby.word = word;
     lobby.theme = theme || '';
-    lobby.traitorId = traitorId;
+    lobby.spyId = traitorId;
+    lobby.spyClass = spyClass;
     lobby.maxTurns = parseInt(maxTurns) || 3;
     lobby.state = 'revealing';
-    
-    // Reveal order - simple random shuffle
-    lobby.revealQueue = shuffle([...gameParticipants]);
-    
-    // PATCH 2: Turn order - weighted shuffle so traitor less likely to go first
-    lobby.turnOrder = weightedShuffle([...gameParticipants], traitorId);
-    console.log('Turn order:', lobby.turnOrder.map(p => p.name + (p.id===traitorId?' (TRAITOR)':'')));
-    
+    lobby.revealQueue = shuffle([...parts]);
+    lobby.turnOrder = weightedShuffle([...parts], traitorId);
     lobby.revealIndex = 0;
     lobby.currentTurnIndex = 0;
     lobby.round = 1;
@@ -286,11 +300,11 @@ io.on('connection', (socket) => {
     lobby.guessing = false;
     lobby.guessText = '';
     lobby.rolesSeen = {};
-    lobby.hintUsed = false;
-    lobby.hintLetter = '';
+    lobby.abilityUsed = false;
+    lobby.abilityResult = null;
     lobby.players.forEach(p => { p.alive = true; });
 
-    cb?.({ ok: true });
+    cb?.({ ok:true });
     broadcast(lobby);
     io.emit('lobbies:changed');
     advanceReveal(lobby);
@@ -299,18 +313,10 @@ io.on('connection', (socket) => {
   socket.on('game:roleSeen', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'revealing') return;
-    
-    // BUG FIX: Only the current player in queue can confirm
-    const currentRevealPlayer = lobby.revealQueue[lobby.revealIndex];
-    if (!currentRevealPlayer || currentRevealPlayer.socketId !== socket.id) {
-      console.log('Wrong player trying to confirm role');
-      return;
-    }
-    
-    // Mark as seen
+    const curr = lobby.revealQueue[lobby.revealIndex];
+    if (!curr || curr.socketId !== socket.id) return;
     if (!lobby.rolesSeen) lobby.rolesSeen = {};
     lobby.rolesSeen[socket.id] = true;
-    
     lobby.revealIndex++;
     if (lobby.revealIndex >= lobby.revealQueue.length) {
       lobby.state = 'playing';
@@ -321,71 +327,46 @@ io.on('connection', (socket) => {
     }
   });
 
-  // PATCH 1: Next turn with turn counting (uses turnOrder)
   socket.on('game:nextTurn', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'playing') return;
-    
-    // Use saved turnOrder, filter to alive only
-    const aliveTurnOrder = lobby.turnOrder.filter(p => {
-      const player = lobby.players.find(pp => pp.id === p.id);
-      return player && player.alive;
-    });
-    if (aliveTurnOrder.length === 0) return;
-    
-    const curr = aliveTurnOrder[lobby.currentTurnIndex % aliveTurnOrder.length];
-    
+    const aliveOrder = lobby.turnOrder.filter(p => lobby.players.find(pp => pp.id===p.id)?.alive);
+    if (aliveOrder.length === 0) return;
+    const curr = aliveOrder[lobby.currentTurnIndex % aliveOrder.length];
     if (socket.id !== lobby.hostId && socket.id !== curr?.socketId) return;
-    
-    // Increment turn count for current player
-    if (curr) {
-      lobby.turnsUsed[curr.socketId] = (lobby.turnsUsed[curr.socketId] || 0) + 1;
-    }
-    
-    // Check if all turns are used
-    if (checkAllTurnsUsed(lobby)) {
-      const traitor = lobby.players.find(p => p.id === lobby.traitorId);
-      if (traitor) traitor.score += 2;
+    if (curr) lobby.turnsUsed[curr.socketId] = (lobby.turnsUsed[curr.socketId]||0)+1;
+    if (allTurnsUsed(lobby)) {
+      const spy = lobby.players.find(p => p.id === lobby.spyId);
+      if (spy) spy.score += 2;
+      awardCoins(lobby, 'spy');
       lobby.state = 'ended';
-      io.to(lobby.code).emit('game:end', {
-        winner: 'traitor',
-        reason: 'turns_ended',
-        word: lobby.word,
-        traitorId: lobby.traitorId,
-        players: playerList(lobby),
-      });
+      io.to(lobby.code).emit('game:end', { winner:'spy', reason:'turns_ended', word:lobby.word, spyId:lobby.spyId, players:playerList(lobby) });
       broadcast(lobby);
       io.emit('lobbies:changed');
       return;
     }
-    
-    // Move to next player who still has turns
-    let nextIndex = (lobby.currentTurnIndex + 1) % aliveTurnOrder.length;
-    let attempts = 0;
-    while (attempts < aliveTurnOrder.length) {
-      const nextPlayer = aliveTurnOrder[nextIndex];
-      if ((lobby.turnsUsed[nextPlayer.socketId] || 0) < lobby.maxTurns) {
-        break;
-      }
-      nextIndex = (nextIndex + 1) % aliveTurnOrder.length;
-      attempts++;
+    let nextIdx = (lobby.currentTurnIndex + 1) % aliveOrder.length;
+    let tries = 0;
+    while (tries < aliveOrder.length) {
+      if ((lobby.turnsUsed[aliveOrder[nextIdx].socketId]||0) < lobby.maxTurns) break;
+      nextIdx = (nextIdx + 1) % aliveOrder.length;
+      tries++;
     }
-    
-    lobby.currentTurnIndex = nextIndex;
+    lobby.currentTurnIndex = nextIdx;
     if (lobby.currentTurnIndex === 0) lobby.round++;
     broadcast(lobby);
   });
 
-  // PATCH 3: Start vote (only once per game)
+  // PATCH: Spy can't start vote
   socket.on('game:startVote', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'playing') return;
-    if (lobby.voteUsed) return; // already used
-    
+    if (lobby.voteUsed) return;
+    // Spy can't start vote
+    if (socket.id === lobby.spyId) return;
     lobby.voteUsed = true;
     lobby.state = 'voting';
     lobby.votes = {};
-    
     broadcast(lobby);
     startVoteTimer(lobby);
   });
@@ -394,167 +375,130 @@ io.on('connection', (socket) => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'voting') return;
     if (socket.id === lobby.hostId) return;
-    // BUG FIX: Traitor can't vote
-    if (socket.id === lobby.traitorId) return;
-    
+    if (socket.id === lobby.spyId) return;
     lobby.votes[socket.id] = targetId;
-
-    // Voters = alive players, not host, not traitor
-    const voters = lobby.players.filter(p => 
-      p.alive && 
-      p.socketId !== lobby.hostId && 
-      p.id !== lobby.traitorId
-    );
-    const voteCount = Object.keys(lobby.votes).length;
-
-    io.to(lobby.code).emit('vote:progress', {
-      voted: voteCount,
-      total: voters.length,
-    });
-
-    if (voteCount >= voters.length) {
-      resolveVote(lobby);
-    }
+    const voters = lobby.players.filter(p => p.alive && p.socketId !== lobby.hostId && p.id !== lobby.spyId);
+    const vc = Object.keys(lobby.votes).length;
+    io.to(lobby.code).emit('vote:progress', { voted:vc, total:voters.length });
+    if (vc >= voters.length) resolveVote(lobby);
   });
 
-  // PATCH 3: Traitor uses hint to see first letter
-  socket.on('game:useHint', () => {
+  // ABILITIES
+  socket.on('game:useAbility', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'playing') return;
-    if (socket.id !== lobby.traitorId) return;
-    if (lobby.hintUsed) return;
-    
-    lobby.hintUsed = true;
-    const firstLetter = lobby.word.charAt(0).toUpperCase();
-    lobby.hintLetter = firstLetter;  // PATCH 2: store letter
-    
-    // Send hint only to traitor
-    io.to(socket.id).emit('game:hintReceived', {
-      firstLetter,
-    });
-    
+    if (socket.id !== lobby.spyId) return;
+    if (lobby.abilityUsed) return;
+    const cls = CLASSES[lobby.spyClass || 'default'];
+    if (!cls) return;
+    lobby.abilityUsed = true;
+    let result = {};
+    if (cls.ability === 'hint') {
+      result = { type:'hint', letter:lobby.word.charAt(0).toUpperCase() };
+    } else if (cls.ability === 'random_letter') {
+      const i = Math.floor(Math.random() * lobby.word.length);
+      result = { type:'random_letter', letter:lobby.word.charAt(i).toUpperCase(), position:i+1, wordLength:lobby.word.length };
+    } else if (cls.ability === 'letter_count') {
+      result = { type:'letter_count', count:lobby.word.length };
+    } else if (cls.ability === 'roulette') {
+      const won = Math.random() < 0.5;
+      const slots = [];
+      if (won) { slots.push(7,7,7); }
+      else {
+        const syms = [1,2,3,4,5,6,7,'⭐','🍒','💎'];
+        for (let i=0;i<3;i++) slots.push(syms[Math.floor(Math.random()*syms.length)]);
+        if (slots[0]===7 && slots[1]===7 && slots[2]===7) slots[2]='⭐';
+      }
+      result = {
+        type:'roulette', slots, won,
+        firstLetter: won ? lobby.word.charAt(0).toUpperCase() : null,
+        lastLetter: won ? lobby.word.charAt(lobby.word.length-1).toUpperCase() : null,
+      };
+    }
+    lobby.abilityResult = result;
+    io.to(socket.id).emit('game:abilityResult', result);
     broadcast(lobby);
   });
 
-  // PATCH 3: Traitor starts guessing - all players see it live
   socket.on('game:startGuessing', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'playing') return;
-    if (socket.id !== lobby.traitorId) return;
-    
+    if (socket.id !== lobby.spyId) return;
     lobby.guessing = true;
     lobby.guessText = '';
     lobby.state = 'guessing';
     broadcast(lobby);
-    
-    io.to(lobby.code).emit('guess:started', {
-      traitorName: lobby.players.find(p => p.id === socket.id)?.name,
-    });
+    io.to(lobby.code).emit('guess:started', { spyName: lobby.players.find(p=>p.id===socket.id)?.name });
   });
 
-  // PATCH 4: Traitor typing - broadcast to all
   socket.on('game:guessTyping', ({ text }) => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'guessing') return;
-    if (socket.id !== lobby.traitorId) return;
-    
+    if (socket.id !== lobby.spyId) return;
     lobby.guessText = text;
     io.to(lobby.code).emit('guess:typing', { text });
   });
 
-  // PATCH 4: Traitor submits guess
   socket.on('game:guessWord', ({ guess }) => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || lobby.state !== 'guessing') return;
-    if (socket.id !== lobby.traitorId) return;
-
-    const isCorrect = guess.toLowerCase().trim() === lobby.word.toLowerCase().trim();
-    const traitorName = lobby.players.find(p => p.id === socket.id)?.name;
-    
+    if (socket.id !== lobby.spyId) return;
+    const correct = guess.toLowerCase().trim() === lobby.word.toLowerCase().trim();
+    const spyName = lobby.players.find(p => p.id === socket.id)?.name;
     lobby.guessing = false;
     lobby.state = 'ended';
-    
-    if (isCorrect) {
-      const traitor = lobby.players.find(p => p.id === lobby.traitorId);
-      if (traitor) traitor.score += 2;
-      io.to(lobby.code).emit('game:end', {
-        winner: 'traitor',
-        reason: 'guess_correct',
-        word: lobby.word,
-        guess,
-        traitorName,
-        traitorId: lobby.traitorId,
-        players: playerList(lobby),
-      });
+    if (correct) {
+      const spy = lobby.players.find(p => p.id === lobby.spyId);
+      if (spy) spy.score += 2;
+      awardCoins(lobby, 'spy');
+      io.to(lobby.code).emit('game:end', { winner:'spy', reason:'guess_correct', word:lobby.word, guess, spyName, spyId:lobby.spyId, players:playerList(lobby) });
     } else {
-      lobby.players.forEach(p => { 
-        if (p.id !== lobby.traitorId && p.socketId !== lobby.hostId) p.score++; 
-      });
-      io.to(lobby.code).emit('game:end', {
-        winner: 'players',
-        reason: 'guess_wrong',
-        word: lobby.word,
-        guess,
-        traitorName,
-        traitorId: lobby.traitorId,
-        players: playerList(lobby),
-      });
+      lobby.players.forEach(p => { if (p.id !== lobby.spyId && p.socketId !== lobby.hostId) p.score++; });
+      awardCoins(lobby, 'civilians');
+      io.to(lobby.code).emit('game:end', { winner:'civilians', reason:'guess_wrong', word:lobby.word, guess, spyName, spyId:lobby.spyId, players:playerList(lobby) });
     }
-    
     broadcast(lobby);
     io.emit('lobbies:changed');
   });
 
-  // PATCH 5: Play again - keep scores, back to lobby
   socket.on('game:playAgain', () => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || socket.id !== lobby.hostId) return;
-    
-    // Reset game state but keep scores
     lobby.state = 'waiting';
-    lobby.word = '';
-    lobby.theme = '';
-    lobby.traitorId = null;
+    lobby.word = ''; lobby.theme = '';
+    lobby.spyId = null; lobby.spyClass = 'default';
     lobby.turnsUsed = {};
-    lobby.votes = {};
-    lobby.voteUsed = false;
-    lobby.guessing = false;
-    lobby.guessText = '';
-    lobby.hintUsed = false;
+    lobby.votes = {}; lobby.voteUsed = false;
+    lobby.guessing = false; lobby.guessText = '';
+    lobby.abilityUsed = false; lobby.abilityResult = null;
     lobby.players.forEach(p => { p.alive = true; });
-    
     broadcast(lobby);
     io.emit('lobbies:changed');
     io.to(lobby.code).emit('game:backToLobby');
   });
 
   socket.on('disconnect', () => {
-    console.log('- disconnect', socket.id);
     const code = socket.data.lobbyCode;
     if (!code) return;
     const lobby = lobbies[code];
     if (!lobby) return;
-
     lobby.players = lobby.players.filter(p => p.socketId !== socket.id);
-
     if (lobby.players.length === 0) {
       if (lobby.voteTimer) clearTimeout(lobby.voteTimer);
       delete lobbies[code];
       io.emit('lobbies:changed');
       return;
     }
-
     if (socket.id === lobby.hostId) {
       lobby.hostId = lobby.players[0].socketId;
       lobby.hostName = lobby.players[0].name;
       io.to(lobby.hostId).emit('host:promoted');
     }
-
     broadcast(lobby);
     io.emit('lobbies:changed');
   });
 });
 
 server.listen(PORT, () => {
-  console.log(`🕵️  Предатель server running → http://localhost:${PORT}`);
+  console.log(`🕵️  ШПИОН server → http://localhost:${PORT}`);
 });
