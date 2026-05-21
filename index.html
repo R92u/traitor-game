@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ШПИОН</title>
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=Manrope:wght@300;400;600&display=swap" rel="stylesheet">
+<script src="/socket.io/socket.io.js"></script>
+<style>
+:root{
+  --bg:#0e0518;
+  --surface:#181028;
+  --card:#1f1432;
+  --border:#3a2654;
+  --accent:#c026d3;       /* magenta/fuchsia */
+  --accent2:#ec4899;      /* pink */
+  --accent3:#a855f7;      /* purple */
+  --gold:#ffb347;
+  --text:#f5e8ff;
+  --muted:#9e7eb8;
+  --green:#10d99e;
+  --radius:16px;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{background:var(--bg);color:var(--text);font-family:'Manrope',sans-serif;min-height:100vh;overflow-x:hidden;}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 60% 50% at 20% 10%,rgba(192,38,211,.12) 0%,transparent 60%),radial-gradient(ellipse 50% 40% at 80% 90%,rgba(236,72,153,.08) 0%,transparent 60%),radial-gradient(ellipse 40% 60% at 50% 50%,rgba(168,85,247,.06) 0%,transparent 60%);pointer-events:none;z-index:0;}
+
+.screen{display:none;position:relative;z-index:1;}
+.screen.active{display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:36px 20px;}
+
+h1.logo{font-family:'Unbounded',sans-serif;font-size:clamp(2.2rem,8vw,4.5rem);font-weight:900;letter-spacing:-2px;line-height:.95;text-align:center;background:linear-gradient(135deg,var(--accent2),var(--accent3));-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;}
+h1.logo span{background:linear-gradient(135deg,var(--accent),var(--accent2));-webkit-background-clip:text;-webkit-text-fill-color:transparent;}
+h2{font-family:'Unbounded',sans-serif;font-size:clamp(1.1rem,3vw,1.6rem);font-weight:700;letter-spacing:-.5px;}
+.subtitle{color:var(--muted);font-size:.8rem;font-weight:400;letter-spacing:.5px;text-transform:uppercase;}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 24px;border-radius:12px;font-family:'Manrope',sans-serif;font-size:.92rem;font-weight:600;cursor:pointer;border:none;transition:all .18s;text-decoration:none;}
+.btn-primary{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;box-shadow:0 4px 24px rgba(192,38,211,.35);}
+.btn-primary:hover{transform:translateY(-2px);box-shadow:0 8px 32px rgba(192,38,211,.5);}
+.btn-secondary{background:var(--card);color:var(--text);border:1px solid var(--border);}
+.btn-secondary:hover{border-color:var(--accent2);}
+.btn-ghost{background:transparent;color:var(--muted);border:1px solid var(--border);}
+.btn-ghost:hover{color:var(--text);border-color:var(--accent3);}
+.btn-green{background:var(--green);color:#0a0a0f;box-shadow:0 4px 20px rgba(16,217,158,.25);}
+.btn-gold{background:linear-gradient(135deg,var(--gold),#ff9f1c);color:#0a0a0f;font-weight:700;}
+.btn:disabled{opacity:.4;cursor:not-allowed;transform:none!important;}
+.btn-full{width:100%;}
+
+input,textarea,select{background:var(--card);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'Manrope',sans-serif;font-size:1rem;padding:12px 16px;width:100%;outline:none;transition:border-color .2s;}
+input:focus,textarea:focus,select:focus{border-color:var(--accent2);}
+input::placeholder{color:var(--muted);}
+label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:block;margin-bottom:6px;}
+
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px;}
+.tag{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:100px;font-size:.72rem;font-weight:600;}
+.tag-red{background:rgba(192,38,211,.18);color:var(--accent2);border:1px solid rgba(236,72,153,.3);}
+.tag-blue{background:rgba(168,85,247,.15);color:var(--accent3);border:1px solid rgba(168,85,247,.3);}
+.tag-gold{background:rgba(255,179,71,.12);color:var(--gold);border:1px solid rgba(255,179,71,.3);}
+.tag-green{background:rgba(16,217,158,.12);color:var(--green);border:1px solid rgba(16,217,158,.3);}
+
+.wrap{width:100%;max-width:580px;}
+.flex-col{display:flex;flex-direction:column;}
+.flex-row{display:flex;flex-direction:row;align-items:center;}
+.center{align-items:center;text-align:center;}
+.gap-s{gap:8px;}.gap-m{gap:14px;}.gap-l{gap:22px;}
+.mt-s{margin-top:8px;}.mt-m{margin-top:14px;}.mt-l{margin-top:22px;}.mt-xl{margin-top:38px;}
+.sep{width:100%;height:1px;background:var(--border);margin:8px 0;}
+.j-between{justify-content:space-between;}
+
+.lobby-item{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:12px;cursor:pointer;margin-bottom:8px;}
+.lobby-item:hover{border-color:var(--accent2);}
+.lobby-item.selected{border-color:var(--accent);background:rgba(192,38,211,.06);}
+
+.player-list{display:flex;flex-wrap:wrap;gap:8px;}
+.player-chip{display:flex;align-items:center;gap:8px;padding:7px 13px;background:var(--surface);border:1px solid var(--border);border-radius:100px;font-size:.88rem;font-weight:600;}
+.avatar{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.75rem;font-weight:700;flex-shrink:0;}
+
+.role-reveal{width:100%;max-width:340px;padding:36px 28px;border-radius:20px;text-align:center;}
+.role-reveal.civilian{background:linear-gradient(145deg,#1a0e2e,#241239);border:1px solid rgba(168,85,247,.35);}
+.role-reveal.spy{background:linear-gradient(145deg,#2a0e25,#380f30);border:1px solid rgba(236,72,153,.4);}
+.role-icon{font-size:3.5rem;margin-bottom:14px;}
+.role-title{font-family:'Unbounded',sans-serif;font-size:1.5rem;font-weight:900;margin-bottom:6px;}
+.role-reveal.civilian .role-title{color:var(--accent3);}
+.role-reveal.spy .role-title{color:var(--accent2);}
+.word-box{margin-top:18px;padding:14px;background:rgba(255,255,255,.05);border-radius:12px;font-size:1.25rem;font-weight:700;}
+
+.score-row{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:12px;margin-bottom:8px;}
+.score-points{font-family:'Unbounded',sans-serif;font-size:1.05rem;font-weight:700;color:var(--gold);}
+
+.vote-option{display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--surface);border:1px solid var(--border);border-radius:12px;cursor:pointer;margin-bottom:8px;}
+.vote-option:hover{border-color:var(--accent2);}
+.vote-option.selected{border-color:var(--accent);background:rgba(192,38,211,.08);}
+
+.status-bar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;margin-bottom:24px;}
+
+.pulse-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite;}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(16,217,158,.4)}50%{box-shadow:0 0 0 7px rgba(16,217,158,0)}}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.anim{animation:fadeIn .35s ease forwards;}
+.anim-delay-1{animation-delay:.1s;opacity:0;}
+.anim-delay-2{animation-delay:.2s;opacity:0;}
+.big-code{font-family:'Unbounded',sans-serif;font-size:2.2rem;font-weight:900;letter-spacing:4px;color:var(--accent2);text-align:center;padding:16px;background:rgba(236,72,153,.08);border:1px solid rgba(236,72,153,.25);border-radius:14px;}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(100px);background:var(--card);border:1px solid var(--border);padding:11px 20px;border-radius:12px;font-size:.88rem;font-weight:600;z-index:999;transition:transform .3s;box-shadow:0 8px 32px rgba(0,0,0,.4);}
+#toast.show{transform:translateX(-50%) translateY(0);}
+
+/* Game table */
+.game-table{position:relative;width:100%;max-width:600px;height:500px;margin:20px auto;}
+.table-circle{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:280px;height:280px;border-radius:50%;background:radial-gradient(ellipse at center,#2a1240 0%,#180828 100%);border:3px solid var(--accent2);box-shadow:0 0 60px rgba(236,72,153,.2),inset 0 0 40px rgba(0,0,0,.5);display:flex;flex-direction:column;align-items:center;justify-content:center;}
+.table-center-text{text-align:center;color:var(--muted);font-size:.85rem;font-weight:600;padding:20px;}
+.table-word{font-family:'Unbounded',sans-serif;font-size:1.4rem;font-weight:900;color:var(--gold);text-align:center;padding:8px 16px;letter-spacing:1px;text-shadow:0 0 20px rgba(255,179,71,.3);}
+.player-seat{position:absolute;display:flex;flex-direction:column;align-items:center;gap:6px;width:120px;transform:translate(-50%,-50%);}
+.player-seat.current{filter:drop-shadow(0 0 12px var(--gold));}
+.player-seat-name{font-weight:700;font-size:.82rem;text-align:center;max-width:120px;word-break:break-word;}
+.player-seat .btn{padding:5px 10px;font-size:.7rem;white-space:nowrap;}
+.role-indicator{font-size:.65rem;color:var(--muted);height:14px;}
+.turns-counter{font-size:.65rem;color:var(--accent3);font-weight:700;height:14px;}
+@media(max-width:600px){.game-table{height:450px;max-width:90vw;}.table-circle{width:200px;height:200px;}.player-seat{width:90px;}.player-seat-name{font-size:.75rem;}.table-word{font-size:1.1rem;}}
+
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:100;display:none;align-items:center;justify-content:center;padding:20px;}
+.modal-bg.show{display:flex;}
+.modal-card{width:100%;max-width:480px;max-height:90vh;overflow-y:auto;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:24px;}
+.vote-timer{font-family:'Unbounded',sans-serif;font-size:3rem;font-weight:900;color:var(--accent2);text-align:center;margin:20px 0;}
+.vote-timer.warning{animation:pulse-timer 1s infinite;}
+@keyframes pulse-timer{0%,100%{transform:scale(1)}50%{transform:scale(1.1)}}
+
+.guess-live-screen{position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:200;display:none;align-items:center;justify-content:center;flex-direction:column;padding:20px;}
+.guess-live-card{width:90%;max-width:500px;background:var(--card);border:2px solid var(--accent);border-radius:20px;padding:30px;text-align:center;box-shadow:0 0 80px rgba(192,38,211,.4);}
+.guess-live-title{font-family:'Unbounded',sans-serif;font-size:1.5rem;font-weight:900;color:var(--accent2);margin-bottom:14px;}
+.guess-live-text{font-family:'Unbounded',sans-serif;font-size:2rem;font-weight:700;color:var(--text);min-height:80px;padding:20px;background:var(--surface);border-radius:12px;border:2px solid var(--border);letter-spacing:2px;display:flex;align-items:center;justify-content:center;word-break:break-all;}
+.guess-live-text.empty::after{content:'_';animation:blink 1s infinite;color:var(--muted);}
+@keyframes blink{0%,50%{opacity:1}51%,100%{opacity:0}}
+
+.top-bar{position:fixed;top:0;left:0;right:0;display:flex;justify-content:space-between;align-items:center;padding:14px 20px;background:rgba(14,5,24,.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--border);z-index:50;}
+.account-info{display:flex;align-items:center;gap:12px;}
+.coins-display{display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(255,179,71,.12);border:1px solid rgba(255,179,71,.35);border-radius:100px;font-family:'Unbounded',sans-serif;font-weight:700;color:var(--gold);font-size:.85rem;}
+.username-display{font-weight:700;color:var(--text);font-size:.9rem;}
+.shop-btn{padding:8px 14px;font-size:.82rem;background:linear-gradient(135deg,var(--accent3),var(--accent2));color:#fff;font-weight:700;border:none;border-radius:10px;cursor:pointer;transition:all .2s;font-family:'Manrope',sans-serif;display:flex;align-items:center;gap:6px;box-shadow:0 4px 16px rgba(168,85,247,.3);}
+.shop-btn:hover{transform:translateY(-1px);box-shadow:0 4px 20px rgba(168,85,247,.5);}
+
+.class-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:10px;}
+.class-card.owned{border-color:var(--green);}
+.class-card.equipped{border-color:var(--gold);background:rgba(255,179,71,.05);box-shadow:0 0 20px rgba(255,179,71,.1);}
+.class-icon{font-size:2rem;flex-shrink:0;}
+.class-name{font-family:'Unbounded',sans-serif;font-weight:700;font-size:1rem;}
+.class-desc{font-size:.8rem;color:var(--muted);line-height:1.4;margin-top:4px;}
+.class-price{font-family:'Unbounded',sans-serif;font-weight:700;color:var(--gold);font-size:1rem;}
+
+.roulette-machine{background:linear-gradient(180deg,#2a0e25,#1a0820);border:3px solid var(--gold);border-radius:20px;padding:24px 16px;margin:20px 0;box-shadow:0 0 40px rgba(255,179,71,.3);}
+.roulette-slots{display:flex;justify-content:center;gap:10px;margin:14px 0;}
+.roulette-slot{width:72px;height:90px;background:var(--bg);border:3px solid var(--gold);border-radius:12px;display:flex;align-items:center;justify-content:center;font-family:'Unbounded',sans-serif;font-size:2.2rem;font-weight:900;color:var(--gold);overflow:hidden;}
+.roulette-result{font-family:'Unbounded',sans-serif;font-size:1.3rem;font-weight:900;text-align:center;margin-top:14px;}
+.roulette-result.win{color:var(--gold);text-shadow:0 0 20px rgba(255,179,71,.6);}
+.roulette-result.lose{color:var(--muted);}
+
+.hint-display{background:rgba(255,179,71,.15);border:2px solid var(--gold);border-radius:8px;padding:4px 10px;font-family:'Unbounded',sans-serif;font-size:.9rem;font-weight:900;color:var(--gold);box-shadow:0 0 12px rgba(255,179,71,.25);text-align:center;max-width:120px;}
+
+.tabs{display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border);}
+.tab{padding:10px 16px;cursor:pointer;font-weight:600;color:var(--muted);border-bottom:2px solid transparent;transition:all .2s;}
+.tab.active{color:var(--accent2);border-bottom-color:var(--accent2);}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<div id="top-bar" class="top-bar" style="display:none;">
+  <div class="account-info">
+    <span class="username-display" id="top-username">—</span>
+    <div class="coins-display" id="top-coins">💰 0</div>
+  </div>
+  <div class="account-info">
+    <button class="shop-btn" onclick="openShop()">🛒 МАГАЗИН</button>
+    <button class="btn btn-ghost" id="top-exit-btn" style="padding:8px 12px;font-size:.8rem;" onclick="topExitAction()">Выход</button>
+  </div>
+</div>
+
+<!-- AUTH -->
+<div id="screen-auth" class="screen active center">
+  <div class="wrap flex-col center gap-m" style="padding:50px 0;max-width:420px;">
+    <span style="font-size:3.2rem;" class="anim">🕵️</span>
+    <h1 class="logo anim anim-delay-1">Ш<span>ПИ</span>ОН</h1>
+    <p class="subtitle anim anim-delay-2">Войди или зарегистрируйся</p>
+    <div class="card mt-xl anim" style="width:100%;">
+      <div class="tabs">
+        <div class="tab active" id="tab-login" onclick="switchAuthTab('login')">Вход</div>
+        <div class="tab" id="tab-register" onclick="switchAuthTab('register')">Регистрация</div>
+      </div>
+      <div id="auth-login">
+        <div class="flex-col gap-m">
+          <div><label>Логин</label><input id="login-username" type="text" placeholder="Логин..." maxlength="20" autocomplete="off"></div>
+          <div><label>Пароль</label><input id="login-password" type="password" placeholder="Пароль..." onkeydown="if(event.key==='Enter') doLogin()"></div>
+          <button class="btn btn-primary btn-full" onclick="doLogin()">Войти</button>
+        </div>
+      </div>
+      <div id="auth-register" style="display:none;">
+        <div class="flex-col gap-m">
+          <div><label>Логин (мин 3 символа)</label><input id="reg-username" type="text" placeholder="Придумай логин..." maxlength="20" autocomplete="off"></div>
+          <div><label>Пароль (мин 4 символа)</label><input id="reg-password" type="password" placeholder="Пароль..." onkeydown="if(event.key==='Enter') doRegister()"></div>
+          <button class="btn btn-primary btn-full" onclick="doRegister()">Создать аккаунт</button>
+        </div>
+      </div>
+    </div>
+    <p style="color:var(--muted);font-size:.78rem;text-align:center;">Аккаунт сохраняется на сервере и в браузере</p>
+  </div>
+</div>
+
+<!-- HOME -->
+<div id="screen-home" class="screen center">
+  <div class="wrap flex-col center gap-m" style="padding:80px 0 50px;">
+    <span style="font-size:3.2rem;" class="anim">🕵️</span>
+    <h1 class="logo anim anim-delay-1">Ш<span>ПИ</span>ОН</h1>
+    <p class="subtitle anim anim-delay-2">Социальная игра на доверие</p>
+    <div class="card mt-xl anim" style="width:100%;max-width:420px;">
+      <div class="flex-col gap-m">
+        <div>
+          <label>Никнейм для игры</label>
+          <input id="home-name" type="text" placeholder="Введите никнейм..." maxlength="20" onkeydown="if(event.key==='Enter') createLobby()">
+          <p style="font-size:.72rem;color:var(--muted);margin-top:4px;">Можно менять перед каждой игрой</p>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="createLobby()">+ Создать лобби</button>
+        <div class="sep"></div>
+        <div><label>Или введите код лобби</label><div class="flex-row gap-s"><input id="join-code" type="text" placeholder="XXXXX" maxlength="5" style="text-transform:uppercase;" onkeydown="if(event.key==='Enter') joinByCode()"><button class="btn btn-secondary" onclick="joinByCode()" style="flex-shrink:0;padding:12px 18px;">→</button></div></div>
+        <button class="btn btn-ghost btn-full" onclick="openLobbyBrowser()">🔍 Список лобби</button>
+      </div>
+    </div>
+    
+    <div class="card mt-m anim" style="width:100%;max-width:420px;">
+      <div class="flex-row j-between" style="margin-bottom:12px;">
+        <h2 style="font-size:1.1rem;">🎒 Инвентарь</h2>
+        <span class="tag tag-blue" id="equipped-tag">Обычный 🕵️</span>
+      </div>
+      <p style="font-size:.78rem;color:var(--muted);margin-bottom:12px;">Класс активен, если ты шпион</p>
+      <div id="inventory-list" class="flex-col gap-s"></div>
+    </div>
+  </div>
+</div>
+
+<!-- LOBBY BROWSER -->
+<div id="screen-browser" class="screen">
+  <div class="wrap flex-col gap-l" style="padding-top:80px;">
+    <div><h2>Открытые лобби</h2><p class="subtitle mt-s">Выберите и присоединитесь</p></div>
+    <div><label>Ваше имя</label><input id="browser-name" type="text" placeholder="Никнейм..." maxlength="20"></div>
+    <div id="lobby-list-el" class="flex-col gap-s"></div>
+    <button class="btn btn-primary btn-full" id="btn-join-selected" onclick="joinSelected()" disabled>Войти →</button>
+    <button class="btn btn-ghost btn-full" onclick="showScreen('screen-home')">← Назад</button>
+  </div>
+</div>
+
+<!-- WAITING -->
+<div id="screen-waiting" class="screen center">
+  <div class="wrap flex-col center gap-l" style="padding-top:80px;">
+    <div><h2 style="text-align:center;">Лобби</h2><div class="flex-row gap-s mt-s" style="justify-content:center;"><div class="pulse-dot"></div><span class="subtitle">Ожидание</span></div></div>
+    <div class="big-code" id="lobby-code-display">XXXXX</div>
+    <p style="text-align:center;color:var(--muted);font-size:.88rem;">Поделитесь кодом с друзьями</p>
+    <button class="btn btn-secondary" onclick="copyCode()" style="font-size:.82rem;">📋 Скопировать</button>
+    <div id="prev-scores-display" class="card" style="width:100%;display:none;">
+      <p class="subtitle" style="margin-bottom:12px;">🏆 Счёт</p>
+      <div id="prev-scores-list" class="flex-col gap-s"></div>
+    </div>
+    <div id="host-panel" class="card" style="width:100%;display:none;">
+      <p class="subtitle" style="margin-bottom:12px;">⚙️ Ведущий</p>
+      <div class="flex-col gap-m">
+        <div><label>🎯 Секретное слово</label><input id="wait-word" type="text" placeholder="Банан, Марс..." maxlength="40"></div>
+        <div><label>📚 Тема раунда</label><input id="wait-theme" type="text" placeholder="Фрукты, Планеты..." maxlength="40"></div>
+        <div><label>🔄 Ходов на игрока</label><input id="wait-max-turns" type="number" min="1" max="10" value="3"></div>
+        <div><label>🎭 Шпион</label><div class="flex-row gap-s"><select id="wait-traitor-sel" style="flex:2;"><option value="">— выбрать —</option></select><button class="btn btn-secondary" onclick="randomTraitor()" style="flex-shrink:0;padding:12px 16px;">🎲</button></div></div>
+        <button class="btn btn-primary btn-full" onclick="startGame()">Начать игру 🚀</button>
+      </div>
+    </div>
+    <div id="guest-wait-msg" class="card" style="width:100%;text-align:center;display:none;"><div class="spinner" style="margin:0 auto 14px;"></div><p style="color:var(--muted);font-size:.9rem;">Ждём ведущего...</p></div>
+    <div><p class="subtitle" style="margin-bottom:10px;">Игроки</p><div id="waiting-players" class="player-list"></div></div>
+    <button class="btn btn-ghost" onclick="leaveLobby()">← Выход</button>
+  </div>
+</div>
+
+<!-- REVEAL -->
+<div id="screen-reveal" class="screen center">
+  <div class="wrap flex-col center gap-l" style="padding-top:80px;width:100%;max-width:700px;">
+    <div><h2 style="text-align:center;">Раздача ролей</h2><p class="subtitle mt-s" id="reveal-whose-turn" style="text-align:center;font-size:.95rem;font-weight:700;"></p></div>
+    <div id="reveal-table" style="position:relative;width:100%;max-width:500px;height:400px;margin:10px auto;"></div>
+    <div id="role-card-wrap" style="width:100%;display:flex;justify-content:center;">
+      <div id="role-card" class="role-reveal civilian" style="opacity:0;">
+        <div class="role-icon" id="role-icon">👁️</div>
+        <div class="role-title" id="role-title">МИРНЫЙ</div>
+        <p style="color:var(--muted);font-size:.83rem;margin-top:5px;" id="role-desc"></p>
+        <div class="word-box" id="role-word"></div>
+        <div id="role-class-info" style="margin-top:12px;display:none;"></div>
+      </div>
+    </div>
+    <button class="btn btn-secondary" id="btn-show-role" onclick="showMyRole()" style="display:none;">👁 Посмотреть роль</button>
+    <button class="btn btn-primary btn-full" id="btn-role-done" onclick="roleSeen()" style="display:none;">Готово ✓</button>
+  </div>
+</div>
+
+<!-- GAME -->
+<div id="screen-game" class="screen" style="padding:80px 0 20px!important;">
+  <div style="width:100%;max-width:1200px;margin:0 auto;padding:0 20px;">
+    <div class="status-bar">
+      <div>
+        <div class="subtitle">Игра</div>
+        <div class="flex-row gap-s mt-s" id="game-badges"></div>
+      </div>
+      <div id="current-turn-info" style="text-align:right;display:none;">
+        <div class="subtitle">Ходит</div>
+        <div id="game-current-turn" style="font-weight:700;color:var(--gold);margin-top:4px;"></div>
+      </div>
+    </div>
+    <div id="game-table" class="game-table"></div>
+    <div id="vote-panel" style="position:fixed;right:20px;top:50%;transform:translateY(-50%);z-index:50;display:none;">
+      <button class="btn btn-primary" id="btn-startvote" onclick="startVote()" style="padding:16px 20px;font-size:1rem;">🗳️<br>ГОЛОС</button>
+    </div>
+    <div id="host-game-panel" class="card" style="display:none;margin-top:24px;">
+      <p class="subtitle" style="margin-bottom:12px;">👁️ Ведущий</p>
+      <div><label>Слово:</label><div id="game-secret-word" style="font-weight:700;color:var(--gold);margin-bottom:16px;font-size:1.2rem;"></div></div>
+      <div id="host-roles-display" class="flex-col gap-s" style="margin-bottom:16px;"></div>
+      <div class="sep"></div>
+      <div class="flex-col gap-s">
+        <button class="btn btn-secondary btn-full" onclick="hostNextTurn()">➡️ След. ход</button>
+        <button class="btn btn-secondary btn-full" onclick="startVote()">🗳️ Голосование</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- VOTE MODAL -->
+<div id="vote-modal-bg" class="modal-bg">
+  <div class="modal-card">
+    <h2 style="margin:0 0 8px;">Голосование</h2>
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:8px;">Найдите шпиона!</p>
+    <div id="vote-timer" class="vote-timer">30</div>
+    <p style="color:var(--muted);font-size:.85rem;text-align:center;margin-bottom:14px;">секунд</p>
+    <div id="vote-options-list" class="flex-col gap-s" style="margin-bottom:16px;max-height:300px;overflow-y:auto;"></div>
+    <button class="btn btn-primary btn-full" id="btn-submit-vote" onclick="submitVoteChoice()">Проголосовать →</button>
+  </div>
+</div>
+
+<!-- GUESS MODAL -->
+<div id="guess-modal-bg" class="modal-bg">
+  <div class="modal-card" style="max-width:400px;">
+    <h2 style="margin-bottom:14px;color:var(--accent2);">🎯 Угадай слово</h2>
+    <p style="color:var(--muted);font-size:.9rem;margin-bottom:14px;">Все видят, что ты пишешь!</p>
+    <input id="guess-input" type="text" placeholder="Слово..." maxlength="50" oninput="onGuessTyping(this.value)" onkeydown="if(event.key==='Enter') submitGuess()">
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-primary btn-full" onclick="submitGuess()">Отправить</button>
+    </div>
+  </div>
+</div>
+
+<!-- GUESS LIVE -->
+<div id="guess-live-screen" class="guess-live-screen">
+  <div class="guess-live-card">
+    <div style="font-size:3rem;margin-bottom:10px;">🎯</div>
+    <div class="guess-live-title" id="guess-live-spy-name">Шпион угадывает...</div>
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:16px;">Что напишет шпион?</p>
+    <div id="guess-live-text" class="guess-live-text empty"></div>
+  </div>
+</div>
+
+<!-- SHOP -->
+<div id="shop-modal-bg" class="modal-bg" onclick="if(event.target===this) closeShop()">
+  <div class="modal-card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h2 style="margin:0;">🛒 Магазин классов</h2>
+      <button class="btn btn-ghost" style="padding:6px 12px;" onclick="closeShop()">✕</button>
+    </div>
+    <div class="coins-display" style="margin-bottom:16px;font-size:1rem;">💰 <span id="shop-coins">0</span> монет</div>
+    <p style="color:var(--muted);font-size:.85rem;margin-bottom:16px;">Купи класс — будет активен когда тебе выпадет шпион</p>
+    <div id="shop-list" class="flex-col gap-s"></div>
+    <p style="color:var(--muted);font-size:.78rem;margin-top:16px;text-align:center;">💡 250 за победу шпиона • 100 за победу мирных</p>
+  </div>
+</div>
+
+<!-- ABILITY MODAL -->
+<div id="ability-modal-bg" class="modal-bg" onclick="if(event.target===this) closeAbilityModal()">
+  <div class="modal-card" id="ability-modal-content"></div>
+</div>
+
+<!-- END -->
+<div id="screen-end" class="screen center">
+  <div class="wrap flex-col center gap-l" style="padding-top:80px;">
+    <div id="end-icon" style="font-size:5rem;"></div>
+    <h2 id="end-title" style="text-align:center;font-size:1.9rem;"></h2>
+    <p id="end-desc" style="text-align:center;color:var(--muted);"></p>
+    <div class="card" style="width:100%;">
+      <p class="subtitle" style="margin-bottom:12px;">🏆 Счёт</p>
+      <div id="end-scores" class="flex-col gap-s"></div>
+    </div>
+    <div class="flex-col gap-s" style="width:100%;">
+      <button class="btn btn-primary btn-full" id="btn-replay" onclick="playAgain()" style="display:none;">🔄 Играть ещё</button>
+      <button class="btn btn-ghost btn-full" onclick="leaveLobby()">Главное меню</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const socket = io();
+let me = {name:'',isHost:false,socketId:''};
+let lobbyCode = '';
+let myRole = null;
+let myAbilityResult = null;
+let gameState = {state:'waiting',players:[]};
+let selectedVoteTarget = null;
+let myVoteSubmitted = false;
+let selectedLobbyCode = null;
+let voteTimerInterval = null;
+let account = null;
+
+const CLASSES = {
+  'default':{id:'default',name:'Обычный',icon:'🕵️',desc:'Узнать первую букву слова',price:0,ability:'hint'},
+  'gambler':{id:'gambler',name:'Лудотряс',icon:'🎰',desc:'Узнать случайную букву и её номер',price:1000,ability:'random_letter'},
+  'fortune_teller':{id:'fortune_teller',name:'Гадалка',icon:'🔮',desc:'Узнать количество букв в слове',price:1200,ability:'letter_count'},
+  'mellstroy':{id:'mellstroy',name:'Меллстрой',icon:'💰',desc:'Рулетка! 777 = первая и последняя буквы',price:2000,ability:'roulette'},
+};
+
+const COLORS=['#ec4899','#a855f7','#c026d3','#f472b6','#9333ea','#d946ef','#e879f9','#ffb347'];
+function color(id){if(!id)return'#888';return COLORS[Math.abs(hashCode(String(id)))%COLORS.length];}
+function hashCode(s){let h=0;for(let i=0;i<s.length;i++){h=(h<<5)-h+s.charCodeAt(i);h|=0;}return h;}
+function av(name){return name&&name.length>0?name.charAt(0).toUpperCase():'?';}
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0);if(typeof updateExitButton==='function')updateExitButton();}
+function toast(msg,ok=false){const t=document.getElementById('toast');t.textContent=msg;t.style.borderColor=ok?'var(--green)':'var(--border)';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
+
+socket.on('connect',()=>{me.socketId=socket.id;tryAutoLogin();});
+
+/* AUTH */
+function switchAuthTab(tab){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+tab).classList.add('active');
+  document.getElementById('auth-login').style.display=tab==='login'?'block':'none';
+  document.getElementById('auth-register').style.display=tab==='register'?'block':'none';
+}
+
+function tryAutoLogin(){
+  const saved=localStorage.getItem('spy_account');
+  if(!saved)return;
+  try{
+    const{username,password}=JSON.parse(saved);
+    socket.emit('account:login',{username,password},res=>{
+      if(res.ok)loginSuccess(res.account,password);
+      else localStorage.removeItem('spy_account');
+    });
+  }catch(e){localStorage.removeItem('spy_account');}
+}
+
+function doRegister(){
+  const username=document.getElementById('reg-username').value.trim();
+  const password=document.getElementById('reg-password').value;
+  if(!username||!password){toast('Заполни поля!');return;}
+  socket.emit('account:register',{username,password},res=>{
+    if(!res.ok)return toast(res.error||'Ошибка');
+    loginSuccess(res.account,password);
+    toast('Аккаунт создан!',true);
+  });
+}
+
+function doLogin(){
+  const username=document.getElementById('login-username').value.trim();
+  const password=document.getElementById('login-password').value;
+  if(!username||!password){toast('Заполни поля!');return;}
+  socket.emit('account:login',{username,password},res=>{
+    if(!res.ok)return toast(res.error||'Ошибка');
+    loginSuccess(res.account,password);
+    toast('Добро пожаловать!',true);
+  });
+}
+
+function loginSuccess(acc,password){
+  account=acc;
+  localStorage.setItem('spy_account',JSON.stringify({username:acc.username,password}));
+  updateAccountDisplay();
+  document.getElementById('top-bar').style.display='flex';
+  document.getElementById('home-name').value=acc.username;
+  showScreen('screen-home');
+}
+
+function logout(){
+  localStorage.removeItem('spy_account');
+  account=null;
+  document.getElementById('top-bar').style.display='none';
+  socket.disconnect();
+  setTimeout(()=>location.reload(),300);
+}
+
+// PATCH: Context-aware exit button
+function topExitAction(){
+  // If user is in a lobby/game (not on home/auth), exit to home
+  const inLobby = document.getElementById('screen-waiting').classList.contains('active') ||
+                  document.getElementById('screen-reveal').classList.contains('active') ||
+                  document.getElementById('screen-game').classList.contains('active') ||
+                  document.getElementById('screen-end').classList.contains('active') ||
+                  document.getElementById('screen-browser').classList.contains('active');
+  if(inLobby){
+    // Exit lobby, return to home (keep account logged in)
+    exitLobbyToHome();
+  }else{
+    // On home screen - log out account
+    logout();
+  }
+}
+
+function exitLobbyToHome(){
+  // Disconnect from lobby room without logging out
+  if(lobbyCode){
+    socket.disconnect();
+    // Reconnect to keep account session
+    setTimeout(()=>{
+      // Save account info to re-login
+      const saved=localStorage.getItem('spy_account');
+      lobbyCode='';
+      me={name:'',isHost:false,socketId:''};
+      myRole=null;
+      myAbilityResult=null;
+      alreadyViewedRole=false;
+      canViewRole=false;
+      gameState={state:'waiting',players:[]};
+      closeVoteModal();
+      closeGuessInputModal();
+      closeGuessLiveScreen();
+      closeAbilityModal();
+      // Reconnect socket
+      socket.connect();
+      // Re-login after reconnect
+      socket.once('connect',()=>{
+        if(saved){
+          try{
+            const {username,password}=JSON.parse(saved);
+            socket.emit('account:login',{username,password},res=>{
+              if(res.ok){
+                account=res.account;
+                updateAccountDisplay();
+                document.getElementById('top-bar').style.display='flex';
+              }
+            });
+          }catch(e){}
+        }
+        me.socketId=socket.id;
+        showScreen('screen-home');
+        updateExitButton();
+        toast('Вышел из лобби',true);
+      });
+    },200);
+  }else{
+    showScreen('screen-home');
+    updateExitButton();
+  }
+}
+
+function updateExitButton(){
+  const btn=document.getElementById('top-exit-btn');
+  if(!btn)return;
+  const inLobby = document.getElementById('screen-waiting').classList.contains('active') ||
+                  document.getElementById('screen-reveal').classList.contains('active') ||
+                  document.getElementById('screen-game').classList.contains('active') ||
+                  document.getElementById('screen-end').classList.contains('active') ||
+                  document.getElementById('screen-browser').classList.contains('active');
+  if(inLobby){
+    btn.textContent='← В меню';
+    btn.style.borderColor='var(--accent2)';
+    btn.style.color='var(--accent2)';
+  }else{
+    btn.textContent='Выход';
+    btn.style.borderColor='';
+    btn.style.color='';
+  }
+}
+
+function updateAccountDisplay(){
+  if(!account)return;
+  document.getElementById('top-username').textContent=account.username;
+  document.getElementById('top-coins').innerHTML='💰 '+account.coins;
+  const eq=CLASSES[account.equippedClass||'default'];
+  document.getElementById('equipped-tag').textContent=eq.name+' '+eq.icon;
+  renderInventory();
+}
+
+function renderInventory(){
+  if(!account)return;
+  const el=document.getElementById('inventory-list');
+  const owned=account.inventory||['default'];
+  el.innerHTML=owned.map(cid=>{
+    const c=CLASSES[cid];
+    if(!c)return'';
+    const eq=account.equippedClass===cid;
+    return`<div class="class-card ${eq?'equipped':'owned'}">
+      <div class="flex-row gap-m">
+        <div class="class-icon">${c.icon}</div>
+        <div style="flex:1;">
+          <div class="class-name">${c.name}</div>
+          <div class="class-desc">${c.desc}</div>
+        </div>
+        ${eq?'<span class="tag tag-gold">Активен</span>':`<button class="btn btn-secondary" style="padding:8px 14px;font-size:.78rem;" onclick="equipClass('${cid}')">Надеть</button>`}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function equipClass(classId){
+  socket.emit('account:equipClass',{classId},res=>{
+    if(!res.ok)return toast(res.error||'Ошибка');
+    account=res.account;
+    updateAccountDisplay();
+    toast('Класс надет: '+CLASSES[classId].name,true);
+  });
+}
+
+/* SHOP */
+function openShop(){
+  if(!account){toast('Войди в аккаунт');return;}
+  document.getElementById('shop-coins').textContent=account.coins;
+  const el=document.getElementById('shop-list');
+  el.innerHTML=Object.values(CLASSES).filter(c=>c.id!=='default').map(c=>{
+    const owned=account.inventory.includes(c.id);
+    const canBuy=account.coins>=c.price;
+    return`<div class="class-card ${owned?'owned':''}">
+      <div class="flex-row gap-m" style="margin-bottom:8px;">
+        <div class="class-icon">${c.icon}</div>
+        <div style="flex:1;">
+          <div class="class-name">${c.name}</div>
+          <div class="class-desc">${c.desc}</div>
+        </div>
+      </div>
+      <div class="flex-row j-between">
+        <div class="class-price">💰 ${c.price}</div>
+        ${owned?'<span class="tag tag-green">✓ Куплен</span>':`<button class="btn btn-primary" style="padding:8px 16px;font-size:.85rem;" ${canBuy?'':'disabled'} onclick="buyClass('${c.id}')">${canBuy?'Купить':'Мало монет'}</button>`}
+      </div>
+    </div>`;
+  }).join('');
+  document.getElementById('shop-modal-bg').classList.add('show');
+}
+
+function closeShop(){document.getElementById('shop-modal-bg').classList.remove('show');}
+
+function buyClass(classId){
+  socket.emit('account:buyClass',{classId},res=>{
+    if(!res.ok)return toast(res.error||'Ошибка');
+    account=res.account;
+    updateAccountDisplay();
+    openShop();
+    toast('Куплено: '+CLASSES[classId].name,true);
+  });
+}
+
+/* HOME */
+function createLobby(){const n=document.getElementById('home-name').value.trim();if(!n){toast('Введите имя!');return;}me.name=n;socket.emit('lobby:create',{name:n},res=>{if(!res.ok)return toast(res.error||'Ошибка');me.isHost=true;lobbyCode=res.code;enterWaiting();});}
+
+function joinByCode(){const c=document.getElementById('join-code').value.trim().toUpperCase();if(!c||c.length!==5)return toast('Введите код!');const n=document.getElementById('home-name').value.trim();if(!n)return toast('Введите имя!');me.name=n;doJoin(c,n);}
+
+function doJoin(code,name){socket.emit('lobby:join',{code,name},res=>{if(!res.ok)return toast(res.error||'Ошибка');me.isHost=res.isHost;lobbyCode=res.code;enterWaiting();});}
+
+function openLobbyBrowser(){document.getElementById('browser-name').value=document.getElementById('home-name').value.trim();selectedLobbyCode=null;refreshBrowser();showScreen('screen-browser');}
+
+function refreshBrowser(){socket.emit('lobbies:list',res=>{const el=document.getElementById('lobby-list-el');if(!res.lobbies.length){el.innerHTML='<div style="text-align:center;color:var(--muted);padding:24px 0;">Нет лобби</div>';return;}el.innerHTML=res.lobbies.map(l=>`<div class="lobby-item ${selectedLobbyCode===l.code?'selected':''}" id="litem-${l.code}" onclick="selectLobby('${l.code}')"><div><div style="font-weight:700;color:var(--accent2);">${l.code}</div><div style="font-size:.85rem;color:var(--muted);margin-top:3px;">Ведущий: ${l.hostName}</div></div><span class="tag tag-blue">${l.playerCount} игр.</span></div>`).join('')});}
+
+function selectLobby(code){selectedLobbyCode=code;document.querySelectorAll('.lobby-item').forEach(el=>el.classList.remove('selected'));const el=document.getElementById('litem-'+code);if(el)el.classList.add('selected');document.getElementById('btn-join-selected').disabled=false;}
+
+function joinSelected(){if(!selectedLobbyCode)return;const n=document.getElementById('browser-name').value.trim()||document.getElementById('home-name').value.trim();if(!n)return toast('Введите имя!');me.name=n;doJoin(selectedLobbyCode,n);}
+
+/* WAITING */
+function enterWaiting(){document.getElementById('lobby-code-display').textContent=lobbyCode;document.getElementById('host-panel').style.display=me.isHost?'block':'none';document.getElementById('guest-wait-msg').style.display=me.isHost?'none':'block';showScreen('screen-waiting');}
+
+function copyCode(){navigator.clipboard?.writeText(lobbyCode).then(()=>toast('Скопировано!',true)).catch(()=>toast('Код: '+lobbyCode,true));}
+
+function leaveLobby(){socket.disconnect();setTimeout(()=>location.reload(),300);}
+
+function randomTraitor(){const sel=document.getElementById('wait-traitor-sel');const opts=[...sel.options].filter(o=>o.value);if(!opts.length){toast('Ждём игроков!');return;}sel.value=opts[Math.floor(Math.random()*opts.length)].value;toast('Выбрано случайно ✓',true);}
+
+function startGame(){
+  const w=document.getElementById('wait-word').value.trim();
+  const t=document.getElementById('wait-theme').value.trim();
+  const tid=document.getElementById('wait-traitor-sel').value;
+  const mt=parseInt(document.getElementById('wait-max-turns').value)||3;
+  if(!w||!tid){toast('Заполни поля!');return;}
+  socket.emit('game:start',{word:w,traitorId:tid,maxTurns:mt,theme:t},res=>{if(res&&!res.ok)toast(res.error||'Ошибка');});
+}
+
+function renderWaitingPlayers(players){
+  document.getElementById('waiting-players').innerHTML=players.map(p=>`<div class="player-chip"><div class="avatar" style="background:${color(p.id)}22;color:${color(p.id)}">${av(p.name)}</div>${p.name}${p.isHost?' <span class="tag tag-gold">ведущий</span>':''}</div>`).join('');
+  const sel=document.getElementById('wait-traitor-sel');
+  const prev=sel.value;
+  const nonHost=players.filter(p=>!p.isHost);
+  sel.innerHTML='<option value="">— выбрать —</option>'+nonHost.map(p=>`<option value="${p.id}">${p.name}</option>`).join('');
+  if(prev)sel.value=prev;
+  
+  const hasScores=players.some(p=>p.score>0);
+  const sd=document.getElementById('prev-scores-display');
+  if(hasScores){
+    sd.style.display='block';
+    const parts=players.filter(p=>!p.isHost);
+    const sorted=[...parts].sort((a,b)=>b.score-a.score);
+    document.getElementById('prev-scores-list').innerHTML=sorted.map((p,i)=>`<div class="score-row"><div><span style="color:var(--muted);">${i+1}.</span> ${p.name}</div><span class="score-points">${p.score}</span></div>`).join('');
+  }else sd.style.display='none';
+}
+
+/* REVEAL */
+let canViewRole=false;
+let alreadyViewedRole=false;
+
+function showMyRole(){
+  if(!myRole)return;
+  if(!canViewRole){toast('Не твоя очередь!');return;}
+  if(alreadyViewedRole){toast('Уже смотрел!');return;}
+  const card=document.getElementById('role-card');
+  const {isSpy,word,spyClass}=myRole;
+  card.className='role-reveal '+(isSpy?'spy':'civilian');
+  document.getElementById('role-icon').textContent=isSpy?'🗡️':'👁️';
+  document.getElementById('role-title').textContent=isSpy?'ШПИОН':'МИРНЫЙ';
+  document.getElementById('role-desc').textContent=isSpy?'Угадай слово!':'Твоё слово:';
+  document.getElementById('role-word').textContent=isSpy?'???':word;
+  const ci=document.getElementById('role-class-info');
+  if(isSpy && spyClass){
+    const cls=CLASSES[spyClass]||CLASSES['default'];
+    ci.style.display='block';
+    ci.innerHTML=`<div style="padding:12px;background:rgba(236,72,153,.1);border:1px solid rgba(236,72,153,.3);border-radius:10px;">
+      <div style="font-size:1.8rem;margin-bottom:4px;">${cls.icon}</div>
+      <div style="font-weight:700;color:var(--accent2);">Класс: ${cls.name}</div>
+      <div style="font-size:.78rem;color:var(--muted);margin-top:4px;">${cls.desc}</div>
+    </div>`;
+  }else ci.style.display='none';
+  card.style.opacity='0';
+  setTimeout(()=>{card.style.opacity='1';},10);
+  document.getElementById('btn-show-role').style.display='none';
+  document.getElementById('btn-role-done').style.display='flex';
+}
+
+function roleSeen(){
+  if(!canViewRole)return;
+  alreadyViewedRole=true;
+  canViewRole=false;
+  socket.emit('game:roleSeen');
+  document.getElementById('role-card').style.opacity='0';
+  document.getElementById('btn-show-role').style.display='none';
+  document.getElementById('btn-role-done').style.display='none';
+}
+
+function renderRevealScreen(state){
+  const crId=state.currentRevealId;
+  const crName=state.currentRevealName;
+  const seen=state.rolesSeen||{};
+  const parts=state.players.filter(p=>!p.isHost);
+  const tc=document.getElementById('reveal-table');
+  if(tc){
+    const n=parts.length, r=170, cx=250, cy=200;
+    let html=`<div class="table-circle" style="width:220px;height:220px;"><div class="table-center-text" style="font-size:.8rem;">${crName?'<strong style="color:var(--gold);">'+crName+'</strong><br>смотрит роль...':'Все посмотрели!'}</div></div>`;
+    parts.forEach((p,i)=>{
+      const a=(i/n)*2*Math.PI-Math.PI/2;
+      const x=cx+r*Math.cos(a), y=cy+r*Math.sin(a);
+      const s=seen[p.socketId||p.id];
+      const cu=p.socketId===crId;
+      html+=`<div class="player-seat" style="left:${x}px;top:${y}px;opacity:${s?'1':'0.4'};">
+        <svg width="50" height="65" viewBox="0 0 60 80">
+          <circle cx="30" cy="15" r="12" fill="${color(p.id)}" stroke="${s?'var(--green)':'var(--text)'}" stroke-width="${s?'2':'1.5'}"/>
+          <rect x="20" y="30" width="20" height="25" rx="6" fill="${color(p.id)}" stroke="${s?'var(--green)':'var(--text)'}" stroke-width="${s?'2':'1.5'}"/>
+        </svg>
+        <div class="player-seat-name" style="font-size:.75rem;">${p.name}</div>
+        <div style="font-size:.65rem;color:${s?'var(--green)':'var(--muted)'};">${s?'✓ готов':cu?'🔍 смотрит':'⏳ ждёт'}</div>
+      </div>`;
+    });
+    tc.innerHTML=html;
+  }
+  const msg=document.getElementById('reveal-whose-turn');
+  if(msg){
+    if(crId===me.socketId){
+      msg.textContent='Твоя очередь! Посмотри роль';
+      msg.style.color='var(--gold)';
+      canViewRole=true;
+      if(!alreadyViewedRole){
+        document.getElementById('btn-show-role').style.display='flex';
+        document.getElementById('btn-role-done').style.display='none';
+      }
+    }else{
+      msg.textContent=alreadyViewedRole?'Ты уже посмотрел. Ждём...':(crName||'Игрок')+' смотрит роль...';
+      msg.style.color='var(--muted)';
+      canViewRole=false;
+      document.getElementById('btn-show-role').style.display='none';
+      document.getElementById('btn-role-done').style.display='none';
+    }
+  }
+}
+
+/* GAME */
+function renderGame(state){
+  gameState=state;
+  if(!state.players||state.players.length===0)return;
+  const parts=state.players.filter(p=>!p.isHost);
+  const alive=parts.filter(p=>p.alive);
+  document.getElementById('game-badges').innerHTML=`<span class="tag tag-blue">Раунд ${state.round||1}</span><span class="tag tag-gold">${alive.length} в игре</span><span class="tag tag-green">${state.maxTurns||3} ходов</span>${state.theme?`<span class="tag" style="background:rgba(168,85,247,.2);color:var(--accent3);">📚 ${state.theme}</span>`:''}`;
+  if(!me.isHost){
+    let oa=alive;
+    if(state.turnOrder&&state.turnOrder.length>0){
+      const om={};state.turnOrder.forEach((id,i)=>{om[id]=i;});
+      oa=[...alive].sort((a,b)=>(om[a.id]??999)-(om[b.id]??999));
+    }
+    const c=oa[state.currentTurnIndex%oa.length];
+    const ti=document.getElementById('current-turn-info');
+    if(ti){ti.style.display=c?'block':'none';if(c)document.getElementById('game-current-turn').textContent=c.name;}
+  }
+  if(me.isHost){
+    document.getElementById('host-game-panel').style.display='block';
+    document.getElementById('vote-panel').style.display='none';
+    document.getElementById('game-secret-word').textContent=state.secretWord||'?';
+    renderHostRoles(state);
+  }else{
+    document.getElementById('host-game-panel').style.display='none';
+    // PATCH: Spy can't start vote
+    const amSpy = myRole && myRole.isSpy;
+    document.getElementById('vote-panel').style.display=amSpy?'none':'block';
+    const vb=document.getElementById('btn-startvote');
+    if(vb){vb.disabled=state.voteUsed;if(state.voteUsed){vb.style.opacity='0.4';vb.innerHTML='🗳️<br>USED';}}
+  }
+  renderPlayerTable(state);
+}
+
+function renderPlayerTable(state){
+  const parts=state.players.filter(p=>!p.isHost);
+  let ord=parts;
+  if(state.turnOrder&&state.turnOrder.length>0){
+    const om={};state.turnOrder.forEach((id,i)=>{om[id]=i;});
+    ord=[...parts].sort((a,b)=>(om[a.id]??999)-(om[b.id]??999));
+  }
+  const alive=ord.filter(p=>p.alive);
+  const curr=alive[state.currentTurnIndex%alive.length];
+  const te=document.getElementById('game-table');
+  const n=ord.length, r=200, cx=300, cy=250;
+  const td=state.theme?`<div style="font-size:.7rem;color:var(--accent3);font-weight:700;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">📚 ${state.theme}</div>`:'';
+  let cc='';
+  if(me.isHost){
+    cc=`${td}<div class="table-word">${state.secretWord||'?'}</div><div class="table-center-text" style="margin-top:8px;">Ведущий</div>`;
+  }else if(myRole && myRole.isSpy){
+    let view='???';
+    if(myAbilityResult){
+      if(myAbilityResult.type==='letter_count')view='⭐'.repeat(myAbilityResult.count);
+      else if(myAbilityResult.type==='roulette' && myAbilityResult.won)view=myAbilityResult.firstLetter+'?'+myAbilityResult.lastLetter;
+    }
+    cc=`${td}<div class="table-word">${view}</div><div class="table-center-text" style="margin-top:8px;">🗡️ Ты шпион</div>`;
+  }else if(myRole && !myRole.isSpy){
+    cc=`${td}<div class="table-word">${myRole.word||state.secretWord}</div><div class="table-center-text" style="margin-top:8px;">👁️ Секретное слово</div>`;
+  }else cc=`${td}<div class="table-center-text">🎯<br>Секретное слово</div>`;
+  let html=`<div class="table-circle">${cc}</div>`;
+  ord.forEach((p,i)=>{
+    const a=(i/n)*2*Math.PI-Math.PI/2;
+    const x=cx+r*Math.cos(a), y=cy+r*Math.sin(a);
+    if(!p.alive){
+      html+=`<div class="player-seat" style="left:${x}px;top:${y}px;opacity:0.3;">
+        <svg width="50" height="65" viewBox="0 0 60 80">
+          <circle cx="30" cy="15" r="12" fill="${color(p.id)}" stroke="var(--muted)" stroke-width="1.5"/>
+          <rect x="20" y="30" width="20" height="25" rx="6" fill="${color(p.id)}" stroke="var(--muted)" stroke-width="1.5"/>
+        </svg>
+        <div class="player-seat-name" style="text-decoration:line-through;">${p.name}</div>
+      </div>`;
+      return;
+    }
+    const cu=curr&&p.id===curr.id;
+    const isMe=p.id===me.socketId;
+    const isSpy=p.id===gameState.spyId;
+    const tl=Math.max(0,(state.maxTurns||3)-(p.turnsUsed||0));
+    let hb='';
+    if(isMe && myRole?.isSpy && myAbilityResult){
+      if(myAbilityResult.type==='hint')hb=`<div class="hint-display">💡 ${myAbilityResult.letter}</div>`;
+      else if(myAbilityResult.type==='random_letter')hb=`<div class="hint-display">🎰 №${myAbilityResult.position}: ${myAbilityResult.letter}<br><span style="font-size:.65rem;color:var(--muted);">из ${myAbilityResult.wordLength}</span></div>`;
+      else if(myAbilityResult.type==='letter_count')hb=`<div class="hint-display">🔮 ${myAbilityResult.count} букв</div>`;
+      else if(myAbilityResult.type==='roulette'){
+        if(myAbilityResult.won)hb=`<div class="hint-display">💰 ${myAbilityResult.firstLetter}...${myAbilityResult.lastLetter}</div>`;
+        else hb=`<div class="hint-display" style="border-color:var(--muted);color:var(--muted);background:rgba(158,126,184,.1);">💰 Не повезло</div>`;
+      }
+    }
+    const showAb=isMe && myRole?.isSpy && !state.abilityUsed && !myAbilityResult;
+    const mc=CLASSES[myRole?.spyClass||'default'];
+    html+=`<div class="player-seat ${cu?'current':''}" style="left:${x}px;top:${y}px;">
+      <svg width="55" height="70" viewBox="0 0 60 80">
+        <circle cx="30" cy="15" r="12" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/>
+        <rect x="20" y="30" width="20" height="25" rx="6" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/>
+        <line x1="18" y1="38" x2="2" y2="35" stroke="var(--text)" stroke-width="1.5"/>
+        <line x1="42" y1="38" x2="58" y2="35" stroke="var(--text)" stroke-width="1.5"/>
+        <line x1="24" y1="55" x2="22" y2="75" stroke="var(--text)" stroke-width="1.5"/>
+        <line x1="36" y1="55" x2="38" y2="75" stroke="var(--text)" stroke-width="1.5"/>
+      </svg>
+      ${cu?'<div class="tag tag-gold" style="font-size:.6rem;padding:1px 8px;">ходит</div>':''}
+      <div class="player-seat-name">${p.name}</div>
+      <div class="role-indicator">${isMe&&myRole?(myRole.isSpy?'🗡️':'👁️'):''}</div>
+      <div class="turns-counter">🔄 ${tl}/${state.maxTurns||3}</div>
+      ${hb}
+      ${isMe?`<button class="btn btn-green" onclick="endMyTurn()">✓ Закончить ход</button>${isSpy&&myRole?.isSpy?'<button class="btn btn-primary" onclick="startGuessing()">🎯 Угадать</button>':''}${showAb?`<button class="btn btn-secondary" style="background:rgba(168,85,247,.15);color:var(--accent3);border-color:var(--accent3);" onclick="useAbility()">${mc.icon} ${mc.name==='Обычный'?'Подсказка':mc.name}</button>`:''}`:''}
+    </div>`;
+  });
+  te.innerHTML=html;
+}
+
+function renderHostRoles(state){
+  const el=document.getElementById('host-roles-display');
+  const parts=state.players.filter(p=>!p.isHost);
+  el.innerHTML=parts.map(p=>{
+    const isSpy=p.id===state.spyId;
+    const sc=isSpy?CLASSES[state.spyClass||'default']:null;
+    return`<div class="score-row"><div>${p.name} <span style="font-size:.75rem;color:var(--muted);">(${p.turnsUsed||0}/${state.maxTurns})</span></div><span class="tag ${isSpy?'tag-red':'tag-blue'}">${isSpy?'ШПИОН '+(sc?sc.icon:''):state.secretWord}</span></div>`;
+  }).join('');
+}
+
+function endMyTurn(){socket.emit('game:nextTurn');}
+function hostNextTurn(){socket.emit('game:nextTurn');}
+function playAgain(){socket.emit('game:playAgain');}
+
+/* ABILITY */
+function useAbility(){
+  if(gameState.abilityUsed){toast('Уже использовано!');return;}
+  if(!myRole?.isSpy)return;
+  const cls=CLASSES[myRole.spyClass||'default'];
+  if(cls.ability==='roulette')showRouletteAnimation();
+  socket.emit('game:useAbility');
+}
+
+function showAbilityResult(result){
+  myAbilityResult=result;
+  renderGame(gameState);
+  const mc=document.getElementById('ability-modal-content');
+  let html='';
+  if(result.type==='hint'){
+    html=`<div style="text-align:center;padding:20px 0;">
+      <div style="font-size:3rem;margin-bottom:14px;">💡</div>
+      <h2 style="color:var(--accent2);margin-bottom:8px;">Подсказка</h2>
+      <p style="color:var(--muted);margin-bottom:20px;">Первая буква слова:</p>
+      <div style="font-family:'Unbounded',sans-serif;font-size:5rem;font-weight:900;color:var(--gold);padding:20px;background:var(--surface);border-radius:16px;border:2px solid var(--gold);">${result.letter}</div>
+      <p style="color:var(--muted);font-size:.8rem;margin:16px 0;">Останется на твоём месте</p>
+      <button class="btn btn-primary btn-full" onclick="closeAbilityModal()">Понятно ✓</button>
+    </div>`;
+  }else if(result.type==='random_letter'){
+    html=`<div style="text-align:center;padding:20px 0;">
+      <div style="font-size:3rem;margin-bottom:14px;">🎰</div>
+      <h2 style="color:var(--accent2);margin-bottom:8px;">Лудотряс</h2>
+      <p style="color:var(--muted);margin-bottom:20px;">Случайная буква:</p>
+      <div style="font-family:'Unbounded',sans-serif;font-size:4rem;font-weight:900;color:var(--gold);padding:20px;background:var(--surface);border-radius:16px;border:2px solid var(--gold);margin-bottom:10px;">${result.letter}</div>
+      <p style="color:var(--accent3);font-weight:700;margin-bottom:20px;">Это буква №${result.position} из ${result.wordLength}</p>
+      <button class="btn btn-primary btn-full" onclick="closeAbilityModal()">Понятно ✓</button>
+    </div>`;
+  }else if(result.type==='letter_count'){
+    html=`<div style="text-align:center;padding:20px 0;">
+      <div style="font-size:3rem;margin-bottom:14px;">🔮</div>
+      <h2 style="color:var(--accent3);margin-bottom:8px;">Гадалка</h2>
+      <p style="color:var(--muted);margin-bottom:20px;">Букв в слове:</p>
+      <div style="font-family:'Unbounded',sans-serif;font-size:5rem;font-weight:900;color:var(--gold);padding:20px;background:var(--surface);border-radius:16px;border:2px solid var(--gold);">${result.count}</div>
+      <p style="color:var(--accent3);font-weight:700;margin:14px 0;font-size:1.5rem;">${'⭐'.repeat(result.count)}</p>
+      <button class="btn btn-primary btn-full" onclick="closeAbilityModal()">Понятно ✓</button>
+    </div>`;
+  }else if(result.type==='roulette'){
+    html=`<div style="text-align:center;padding:20px 0;">
+      <div style="font-size:3rem;margin-bottom:14px;">💰</div>
+      <h2 style="color:var(--gold);margin-bottom:8px;">Меллстрой</h2>
+      <div class="roulette-machine">
+        <div class="roulette-slots">
+          <div class="roulette-slot">${result.slots[0]}</div>
+          <div class="roulette-slot">${result.slots[1]}</div>
+          <div class="roulette-slot">${result.slots[2]}</div>
+        </div>
+        <div class="roulette-result ${result.won?'win':'lose'}">${result.won?'🎉 7 7 7 — ДЖЕКПОТ!':'😢 Не повезло'}</div>
+      </div>
+      ${result.won?`<p style="color:var(--gold);font-weight:700;margin:14px 0;">${result.firstLetter} • ${result.lastLetter}</p>`:'<p style="color:var(--muted);">Способность израсходована</p>'}
+      <button class="btn btn-primary btn-full" style="margin-top:14px;" onclick="closeAbilityModal()">Закрыть</button>
+    </div>`;
+  }
+  mc.innerHTML=html;
+  document.getElementById('ability-modal-bg').classList.add('show');
+}
+
+function showRouletteAnimation(){
+  const mc=document.getElementById('ability-modal-content');
+  mc.innerHTML=`<div style="text-align:center;padding:20px 0;">
+    <div style="font-size:3rem;margin-bottom:14px;">💰</div>
+    <h2 style="color:var(--gold);margin-bottom:8px;">Крутим рулетку!</h2>
+    <div class="roulette-machine">
+      <div class="roulette-slots">
+        <div class="roulette-slot" id="slot-1">🎲</div>
+        <div class="roulette-slot" id="slot-2">🎲</div>
+        <div class="roulette-slot" id="slot-3">🎲</div>
+      </div>
+    </div>
+    <p style="color:var(--muted);margin-top:14px;">Крутится...</p>
+  </div>`;
+  document.getElementById('ability-modal-bg').classList.add('show');
+  const syms=['1','2','3','4','5','6','7','⭐','🍒','💎'];
+  let sc=0;
+  const iv=setInterval(()=>{
+    document.getElementById('slot-1').textContent=syms[Math.floor(Math.random()*syms.length)];
+    document.getElementById('slot-2').textContent=syms[Math.floor(Math.random()*syms.length)];
+    document.getElementById('slot-3').textContent=syms[Math.floor(Math.random()*syms.length)];
+    sc++;
+    if(sc>=15)clearInterval(iv);
+  },80);
+}
+
+function closeAbilityModal(){document.getElementById('ability-modal-bg').classList.remove('show');}
+
+/* VOTE */
+function startVote(){
+  if(gameState.voteUsed){toast('Уже использовано!');return;}
+  // PATCH: Spy can't start vote
+  if(myRole && myRole.isSpy){toast('Шпион не может начать голосование!');return;}
+  socket.emit('game:startVote');
+}
+
+function showVoteModal(){
+  selectedVoteTarget=null;
+  myVoteSubmitted=false;
+  const alive=gameState.players.filter(p=>p.alive&&!p.isHost);
+  const el=document.getElementById('vote-options-list');
+  el.innerHTML=alive.map(p=>`<div class="vote-option" id="vopt-${p.id}" onclick="selectVoteFor('${p.id}')"><svg width="36" height="36" viewBox="0 0 60 80"><circle cx="30" cy="15" r="12" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/><rect x="20" y="30" width="20" height="25" rx="6" fill="${color(p.id)}" stroke="var(--text)" stroke-width="1.5"/></svg><span>${p.name}</span></div>`).join('');
+  const btn=document.getElementById('btn-submit-vote');
+  btn.disabled=false;
+  btn.textContent='Проголосовать →';
+  const cantVote = me.isHost || (myRole && myRole.isSpy);
+  if(cantVote){
+    document.getElementById('vote-options-list').innerHTML='<p style="text-align:center;color:var(--muted);padding:20px;">'+(me.isHost?'Ты ведущий':'Ты шпион')+', наблюдай</p>';
+    btn.style.display='none';
+  }else btn.style.display='flex';
+  document.getElementById('vote-modal-bg').classList.add('show');
+}
+
+function selectVoteFor(id){if(myVoteSubmitted)return;selectedVoteTarget=id;document.querySelectorAll('.vote-option').forEach(o=>o.classList.remove('selected'));const el=document.getElementById('vopt-'+id);if(el)el.classList.add('selected');}
+
+function submitVoteChoice(){if(!selectedVoteTarget){toast('Выбери игрока!');return;}myVoteSubmitted=true;socket.emit('game:vote',{targetId:selectedVoteTarget});const btn=document.getElementById('btn-submit-vote');btn.disabled=true;btn.textContent='✓ Учтён';toast('Голос засчитан',true);}
+
+function startVoteTimer(endTime){
+  if(voteTimerInterval)clearInterval(voteTimerInterval);
+  const te=document.getElementById('vote-timer');
+  function u(){const l=Math.max(0,Math.ceil((endTime-Date.now())/1000));te.textContent=l;if(l<=10)te.classList.add('warning');if(l<=0){clearInterval(voteTimerInterval);voteTimerInterval=null;}}
+  u();voteTimerInterval=setInterval(u,200);
+}
+
+function closeVoteModal(){document.getElementById('vote-modal-bg').classList.remove('show');if(voteTimerInterval){clearInterval(voteTimerInterval);voteTimerInterval=null;}}
+
+/* GUESS */
+function startGuessing(){socket.emit('game:startGuessing');}
+function openGuessInputModal(){document.getElementById('guess-input').value='';document.getElementById('guess-modal-bg').classList.add('show');setTimeout(()=>document.getElementById('guess-input').focus(),100);}
+function onGuessTyping(text){socket.emit('game:guessTyping',{text});}
+function submitGuess(){const w=document.getElementById('guess-input').value.trim();if(!w){toast('Введи слово!');return;}socket.emit('game:guessWord',{guess:w});closeGuessInputModal();}
+function closeGuessInputModal(){document.getElementById('guess-modal-bg').classList.remove('show');}
+function showGuessLiveScreen(spyName){document.getElementById('guess-live-spy-name').textContent=spyName+' угадывает...';document.getElementById('guess-live-text').textContent='';document.getElementById('guess-live-text').classList.add('empty');document.getElementById('guess-live-screen').style.display='flex';}
+function updateGuessLiveText(text){const e=document.getElementById('guess-live-text');e.textContent=text;if(text.length===0)e.classList.add('empty');else e.classList.remove('empty');}
+function closeGuessLiveScreen(){document.getElementById('guess-live-screen').style.display='none';}
+
+function showEnd(data){
+  closeVoteModal();closeGuessInputModal();closeGuessLiveScreen();closeAbilityModal();
+  document.getElementById('end-icon').textContent=data.winner==='spy'?'🗡️':'🎉';
+  document.getElementById('end-title').innerHTML=data.winner==='spy'?'<span style="color:var(--accent2)">Шпион победил!</span>':'<span style="color:var(--green)">Мирные победили!</span>';
+  let d='Слово: '+data.word;
+  if(data.reason==='guess_correct')d=data.spyName+' угадал: '+data.guess;
+  else if(data.reason==='guess_wrong')d=data.spyName+' ошибся: "'+data.guess+'". Слово: '+data.word;
+  else if(data.reason==='turns_ended')d='Ходы закончились. Шпион не пойман!';
+  else if(data.reason==='vote')d=data.winner==='civilians'?'Шпион найден! Слово: '+data.word:'Голосование промахнулось. Слово: '+data.word;
+  document.getElementById('end-desc').textContent=d;
+  const parts=data.players.filter(p=>!p.isHost);
+  const sorted=[...parts].sort((a,b)=>b.score-a.score);
+  document.getElementById('end-scores').innerHTML=sorted.map((p,i)=>`<div class="score-row"><div><span style="color:var(--muted);">${i+1}.</span> ${p.name} ${p.id===data.spyId?'<span class="tag tag-red">шпион</span>':''}</div><span class="score-points">${p.score}</span></div>`).join('');
+  document.getElementById('btn-replay').style.display=me.isHost?'block':'none';
+  showScreen('screen-end');
+}
+
+/* SOCKET EVENTS */
+socket.on('lobbies:changed',()=>{if(document.getElementById('screen-browser').classList.contains('active'))refreshBrowser();});
+socket.on('lobby:update',(state)=>{
+  gameState=state;
+  if(state.state==='waiting'){renderWaitingPlayers(state.players);alreadyViewedRole=false;canViewRole=false;}
+  if(state.state==='revealing'){renderRevealScreen(state);if(!document.getElementById('screen-reveal').classList.contains('active'))showScreen('screen-reveal');}
+  if(state.state==='playing'){renderGame(state);if(!document.getElementById('screen-game').classList.contains('active'))showScreen('screen-game');}
+  if(state.state==='voting'){renderGame(state);if(!document.getElementById('screen-game').classList.contains('active'))showScreen('screen-game');showVoteModal();}
+});
+socket.on('reveal:nextPlayer',()=>{});
+socket.on('game:yourRole',(r)=>{
+  myRole=r;
+  // PATCH: Reset flags when getting a new role (new game)
+  alreadyViewedRole=false;
+  myAbilityResult=null;
+});
+socket.on('vote:started',(d)=>{showVoteModal();startVoteTimer(d.endTime);});
+socket.on('vote:progress',()=>{});
+socket.on('vote:result',(d)=>{if(!d.correct){closeVoteModal();const e=gameState.players?.find(p=>p.id===d.eliminatedId);toast('❌ '+e?.name+' был мирным');}});
+socket.on('guess:started',(d)=>{if(me.socketId===gameState.spyId)openGuessInputModal();else showGuessLiveScreen(d.spyName);});
+socket.on('guess:typing',({text})=>{if(me.socketId!==gameState.spyId)updateGuessLiveText(text);});
+socket.on('game:abilityResult',(r)=>{if(r.type==='roulette')setTimeout(()=>showAbilityResult(r),1500);else showAbilityResult(r);});
+socket.on('game:end',showEnd);
+socket.on('game:backToLobby',()=>{
+  myRole=null;myAbilityResult=null;
+  alreadyViewedRole=false;canViewRole=false;
+  closeVoteModal();closeGuessInputModal();closeGuessLiveScreen();closeAbilityModal();
+  showScreen('screen-waiting');
+  toast('Возврат в лобби!',true);
+});
+socket.on('account:update',(a)=>{if(account){account.coins=a.coins;account.inventory=a.inventory;account.equippedClass=a.equippedClass;updateAccountDisplay();}});
+socket.on('host:promoted',()=>{me.isHost=true;toast('Ты ведущий!',true);});
+</script>
+</body>
+</html>
