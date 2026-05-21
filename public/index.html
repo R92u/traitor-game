@@ -172,7 +172,7 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
   </div>
   <div class="account-info">
     <button class="shop-btn" onclick="openShop()">🛒 МАГАЗИН</button>
-    <button class="btn btn-ghost" style="padding:8px 12px;font-size:.8rem;" onclick="logout()">Выход</button>
+    <button class="btn btn-ghost" id="top-exit-btn" style="padding:8px 12px;font-size:.8rem;" onclick="topExitAction()">Выход</button>
   </div>
 </div>
 
@@ -420,7 +420,7 @@ const COLORS=['#ec4899','#a855f7','#c026d3','#f472b6','#9333ea','#d946ef','#e879
 function color(id){if(!id)return'#888';return COLORS[Math.abs(hashCode(String(id)))%COLORS.length];}
 function hashCode(s){let h=0;for(let i=0;i<s.length;i++){h=(h<<5)-h+s.charCodeAt(i);h|=0;}return h;}
 function av(name){return name&&name.length>0?name.charAt(0).toUpperCase():'?';}
-function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0);}
+function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0);if(typeof updateExitButton==='function')updateExitButton();}
 function toast(msg,ok=false){const t=document.getElementById('toast');t.textContent=msg;t.style.borderColor=ok?'var(--green)':'var(--border)';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
 socket.on('connect',()=>{me.socketId=socket.id;tryAutoLogin();});
@@ -482,6 +482,89 @@ function logout(){
   document.getElementById('top-bar').style.display='none';
   socket.disconnect();
   setTimeout(()=>location.reload(),300);
+}
+
+// PATCH: Context-aware exit button
+function topExitAction(){
+  // If user is in a lobby/game (not on home/auth), exit to home
+  const inLobby = document.getElementById('screen-waiting').classList.contains('active') ||
+                  document.getElementById('screen-reveal').classList.contains('active') ||
+                  document.getElementById('screen-game').classList.contains('active') ||
+                  document.getElementById('screen-end').classList.contains('active') ||
+                  document.getElementById('screen-browser').classList.contains('active');
+  if(inLobby){
+    // Exit lobby, return to home (keep account logged in)
+    exitLobbyToHome();
+  }else{
+    // On home screen - log out account
+    logout();
+  }
+}
+
+function exitLobbyToHome(){
+  // Disconnect from lobby room without logging out
+  if(lobbyCode){
+    socket.disconnect();
+    // Reconnect to keep account session
+    setTimeout(()=>{
+      // Save account info to re-login
+      const saved=localStorage.getItem('spy_account');
+      lobbyCode='';
+      me={name:'',isHost:false,socketId:''};
+      myRole=null;
+      myAbilityResult=null;
+      alreadyViewedRole=false;
+      canViewRole=false;
+      gameState={state:'waiting',players:[]};
+      closeVoteModal();
+      closeGuessInputModal();
+      closeGuessLiveScreen();
+      closeAbilityModal();
+      // Reconnect socket
+      socket.connect();
+      // Re-login after reconnect
+      socket.once('connect',()=>{
+        if(saved){
+          try{
+            const {username,password}=JSON.parse(saved);
+            socket.emit('account:login',{username,password},res=>{
+              if(res.ok){
+                account=res.account;
+                updateAccountDisplay();
+                document.getElementById('top-bar').style.display='flex';
+              }
+            });
+          }catch(e){}
+        }
+        me.socketId=socket.id;
+        showScreen('screen-home');
+        updateExitButton();
+        toast('Вышел из лобби',true);
+      });
+    },200);
+  }else{
+    showScreen('screen-home');
+    updateExitButton();
+  }
+}
+
+function updateExitButton(){
+  const btn=document.getElementById('top-exit-btn');
+  if(!btn)return;
+  const inLobby = document.getElementById('screen-waiting').classList.contains('active') ||
+                  document.getElementById('screen-reveal').classList.contains('active') ||
+                  document.getElementById('screen-game').classList.contains('active') ||
+                  document.getElementById('screen-end').classList.contains('active') ||
+                  document.getElementById('screen-browser').classList.contains('active');
+  if(inLobby){
+    btn.textContent='← В меню';
+    btn.style.borderColor='var(--accent2)';
+    btn.style.color='var(--accent2)';
+  }else{
+    btn.textContent='Выход';
+    btn.style.borderColor='';
+    btn.style.color='';
+  }
 }
 
 function updateAccountDisplay(){
@@ -983,7 +1066,12 @@ socket.on('lobby:update',(state)=>{
   if(state.state==='voting'){renderGame(state);if(!document.getElementById('screen-game').classList.contains('active'))showScreen('screen-game');showVoteModal();}
 });
 socket.on('reveal:nextPlayer',()=>{});
-socket.on('game:yourRole',(r)=>{myRole=r;});
+socket.on('game:yourRole',(r)=>{
+  myRole=r;
+  // PATCH: Reset flags when getting a new role (new game)
+  alreadyViewedRole=false;
+  myAbilityResult=null;
+});
 socket.on('vote:started',(d)=>{showVoteModal();startVoteTimer(d.endTime);});
 socket.on('vote:progress',()=>{});
 socket.on('vote:result',(d)=>{if(!d.correct){closeVoteModal();const e=gameState.players?.find(p=>p.id===d.eliminatedId);toast('❌ '+e?.name+' был мирным');}});
@@ -993,6 +1081,7 @@ socket.on('game:abilityResult',(r)=>{if(r.type==='roulette')setTimeout(()=>showA
 socket.on('game:end',showEnd);
 socket.on('game:backToLobby',()=>{
   myRole=null;myAbilityResult=null;
+  alreadyViewedRole=false;canViewRole=false;
   closeVoteModal();closeGuessInputModal();closeGuessLiveScreen();closeAbilityModal();
   showScreen('screen-waiting');
   toast('Возврат в лобби!',true);
