@@ -2,7 +2,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
-const fs = require('fs');
 const crypto = require('crypto');
 
 const app = express();
@@ -13,26 +12,128 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── ACCOUNTS ───────────────────────────────────────
-const ACCOUNTS_FILE = path.join(__dirname, 'accounts.json');
-let accounts = {};
+// ─── FIREBASE REST API ──────────────────────────────
+const FIREBASE_DB_URL = 'https://shpion-fb6cc-default-rtdb.firebaseio.com';
+// Optional: secret/token for added security (set via env)
+const FIREBASE_AUTH = process.env.FIREBASE_AUTH || '';
 
-function loadAccounts() {
+async function fbGet(path) {
   try {
-    if (fs.existsSync(ACCOUNTS_FILE)) {
-      accounts = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
-      console.log(`Loaded ${Object.keys(accounts).length} accounts`);
+    const url = `${FIREBASE_DB_URL}/${path}.json${FIREBASE_AUTH ? '?auth='+FIREBASE_AUTH : ''}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error('FB GET error:', res.status, await res.text());
+      return null;
     }
-  } catch (e) { console.error('Load accounts:', e); accounts = {}; }
+    return await res.json();
+  } catch (e) {
+    console.error('fbGet error:', e.message);
+    return null;
+  }
 }
-function saveAccounts() {
-  try { fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(accounts, null, 2)); }
-  catch (e) { console.error('Save accounts:', e); }
+
+async function fbSet(path, data) {
+  try {
+    const url = `${FIREBASE_DB_URL}/${path}.json${FIREBASE_AUTH ? '?auth='+FIREBASE_AUTH : ''}`;
+    const res = await fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      console.error('FB SET error:', res.status, await res.text());
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('fbSet error:', e.message);
+    return false;
+  }
 }
+
+async function fbUpdate(path, updates) {
+  try {
+    const url = `${FIREBASE_DB_URL}/${path}.json${FIREBASE_AUTH ? '?auth='+FIREBASE_AUTH : ''}`;
+    const res = await fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      console.error('FB UPDATE error:', res.status, await res.text());
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error('fbUpdate error:', e.message);
+    return false;
+  }
+}
+
+console.log('🔥 Firebase REST API → ' + FIREBASE_DB_URL);
+
+// ─── SESSIONS ───────────────────────────────────────
+// Token-based sessions: when user logs in, we generate token and save it
+// On reload, browser sends token, we verify it in Firebase
+const sessions = {}; // in-memory cache: {token: username}
+
+function generateToken() {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+// ─── ACCOUNTS ───────────────────────────────────────
 function hashPassword(p) {
   return crypto.createHash('sha256').update(p + 'spy_salt_2024').digest('hex');
 }
-loadAccounts();
+
+// Sanitize username for Firebase key (no . # $ / [ ])
+function sanitizeKey(username) {
+  return username.toLowerCase().replace(/[.#$/\[\]]/g, '_');
+}
+
+async function getAccount(username) {
+  const acc = await fbGet(`accounts/${sanitizeKey(username)}`);
+  return acc;
+}
+
+async function saveAccount(username, data) {
+  return await fbSet(`accounts/${sanitizeKey(username)}`, data);
+}
+
+async function saveSession(token, username) {
+  sessions[token] = username;
+  return await fbSet(`sessions/${token}`, { username, createdAt: Date.now() });
+}
+
+async function getSession(token) {
+  if (sessions[token]) return sessions[token];
+  const data = await fbGet(`sessions/${token}`);
+  if (data?.username) {
+    sessions[token] = data.username;
+    return data.username;
+  }
+  return null;
+}
+
+async function deleteSession(token) {
+  delete sessions[token];
+  return await fbSet(`sessions/${token}`, null);
+}
+
+// In-memory cache for active accounts
+const accountCache = {};
+
+async function getCachedAccount(username) {
+  if (accountCache[username]) return accountCache[username];
+  const acc = await getAccount(username);
+  if (acc) accountCache[username] = acc;
+  return acc;
+}
+
+async function updateCacheAndSave(username, account) {
+  accountCache[username] = account;
+  return await saveAccount(username, account);
+}
 
 // ─── CLASSES ────────────────────────────────────────
 const CLASSES = {
@@ -139,24 +240,23 @@ function startVoteTimer(lobby) {
   io.to(lobby.code).emit('vote:started', { endTime: lobby.voteEndTime });
   lobby.voteTimer = setTimeout(() => resolveVote(lobby), 30000);
 }
-function awardCoins(lobby, winner) {
-  lobby.players.forEach(p => {
-    if (!p.username || p.socketId === lobby.hostId) return;
-    const acc = accounts[p.username];
-    if (!acc) return;
+async function awardCoins(lobby, winner) {
+  const updates = [];
+  for (const p of lobby.players) {
+    if (!p.username || p.socketId === lobby.hostId) continue;
+    const acc = await getCachedAccount(p.username);
+    if (!acc) continue;
     if (winner === 'spy' && p.id === lobby.spyId) acc.coins += REWARDS.spy_win;
     else if (winner === 'civilians' && p.id !== lobby.spyId) acc.coins += REWARDS.civilian_win;
-  });
-  saveAccounts();
-  lobby.players.forEach(p => {
-    if (p.username && accounts[p.username]) {
-      io.to(p.socketId).emit('account:update', {
-        coins: accounts[p.username].coins,
-        inventory: accounts[p.username].inventory,
-        equippedClass: accounts[p.username].equippedClass,
-      });
-    }
-  });
+    else continue;
+    updates.push(updateCacheAndSave(p.username, acc));
+    io.to(p.socketId).emit('account:update', {
+      coins: acc.coins,
+      inventory: acc.inventory,
+      equippedClass: acc.equippedClass,
+    });
+  }
+  await Promise.all(updates);
 }
 function resolveVote(lobby) {
   if (lobby.voteTimer) { clearTimeout(lobby.voteTimer); lobby.voteTimer = null; }
@@ -187,52 +287,107 @@ io.on('connection', (socket) => {
   console.log('+ connect', socket.id);
 
   // ACCOUNTS
-  socket.on('account:register', ({ username, password }, cb) => {
+  socket.on('account:register', async ({ username, password }, cb) => {
     if (!username || !password) return cb({ ok:false, error:'Заполни поля' });
     if (username.length < 3) return cb({ ok:false, error:'Логин минимум 3 символа' });
     if (password.length < 4) return cb({ ok:false, error:'Пароль минимум 4 символа' });
-    if (accounts[username]) return cb({ ok:false, error:'Логин занят' });
-    accounts[username] = {
+    
+    const existing = await getAccount(username);
+    if (existing) return cb({ ok:false, error:'Логин занят' });
+    
+    const newAccount = {
+      username,
       passwordHash: hashPassword(password),
-      coins: 0, inventory: ['default'], equippedClass: 'default',
+      coins: 0,
+      inventory: ['default'],
+      equippedClass: 'default',
       createdAt: Date.now(),
     };
-    saveAccounts();
+    
+    const saved = await saveAccount(username, newAccount);
+    if (!saved) return cb({ ok:false, error:'Ошибка сохранения. Проверь Firebase rules!' });
+    
+    accountCache[username] = newAccount;
     socket.data.username = username;
-    cb({ ok:true, account:{ username, coins:0, inventory:['default'], equippedClass:'default' } });
+    
+    // Create session token
+    const token = generateToken();
+    await saveSession(token, username);
+    
+    cb({ ok:true, token, account:{ username, coins:0, inventory:['default'], equippedClass:'default' } });
   });
 
-  socket.on('account:login', ({ username, password }, cb) => {
-    const acc = accounts[username];
+  socket.on('account:login', async ({ username, password }, cb) => {
+    const acc = await getAccount(username);
     if (!acc) return cb({ ok:false, error:'Аккаунт не найден' });
     if (acc.passwordHash !== hashPassword(password)) return cb({ ok:false, error:'Неверный пароль' });
+    
+    // Ensure all fields exist
+    if (!acc.inventory) acc.inventory = ['default'];
+    if (!acc.equippedClass) acc.equippedClass = 'default';
+    if (typeof acc.coins !== 'number') acc.coins = 0;
+    
+    accountCache[username] = acc;
     socket.data.username = username;
+    
+    // Create session token
+    const token = generateToken();
+    await saveSession(token, username);
+    
+    cb({ ok:true, token, account:{ username, coins:acc.coins, inventory:acc.inventory, equippedClass:acc.equippedClass } });
+  });
+
+  // Auto-login by session token (used after page reload)
+  socket.on('account:autoLogin', async ({ token }, cb) => {
+    if (!token) return cb({ ok:false });
+    const username = await getSession(token);
+    if (!username) return cb({ ok:false, error:'Сессия истекла' });
+    
+    const acc = await getAccount(username);
+    if (!acc) return cb({ ok:false, error:'Аккаунт не найден' });
+    
+    if (!acc.inventory) acc.inventory = ['default'];
+    if (!acc.equippedClass) acc.equippedClass = 'default';
+    if (typeof acc.coins !== 'number') acc.coins = 0;
+    
+    accountCache[username] = acc;
+    socket.data.username = username;
+    
     cb({ ok:true, account:{ username, coins:acc.coins, inventory:acc.inventory, equippedClass:acc.equippedClass } });
   });
 
-  socket.on('account:buyClass', ({ classId }, cb) => {
+  socket.on('account:logout', async ({ token }) => {
+    if (token) await deleteSession(token);
+    socket.data.username = null;
+  });
+
+  socket.on('account:buyClass', async ({ classId }, cb) => {
     const u = socket.data.username;
     if (!u) return cb({ ok:false, error:'Войди в аккаунт' });
-    const acc = accounts[u];
+    const acc = await getCachedAccount(u);
     if (!acc) return cb({ ok:false, error:'Аккаунт не найден' });
     const cls = CLASSES[classId];
     if (!cls) return cb({ ok:false, error:'Класс не найден' });
     if (acc.inventory.includes(classId)) return cb({ ok:false, error:'Уже куплен' });
     if (acc.coins < cls.price) return cb({ ok:false, error:'Не хватает монет' });
+    
     acc.coins -= cls.price;
     acc.inventory.push(classId);
-    saveAccounts();
+    await updateCacheAndSave(u, acc);
+    
     cb({ ok:true, account:{ username:u, coins:acc.coins, inventory:acc.inventory, equippedClass:acc.equippedClass } });
   });
 
-  socket.on('account:equipClass', ({ classId }, cb) => {
+  socket.on('account:equipClass', async ({ classId }, cb) => {
     const u = socket.data.username;
     if (!u) return cb({ ok:false, error:'Войди в аккаунт' });
-    const acc = accounts[u];
+    const acc = await getCachedAccount(u);
     if (!acc) return cb({ ok:false, error:'Аккаунт не найден' });
     if (!acc.inventory.includes(classId)) return cb({ ok:false, error:'Класс не куплен' });
+    
     acc.equippedClass = classId;
-    saveAccounts();
+    await updateCacheAndSave(u, acc);
+    
     cb({ ok:true, account:{ username:u, coins:acc.coins, inventory:acc.inventory, equippedClass:acc.equippedClass } });
   });
 
@@ -269,7 +424,7 @@ io.on('connection', (socket) => {
     io.emit('lobbies:changed');
   });
 
-  socket.on('game:start', ({ word, traitorId, maxTurns, theme }, cb) => {
+  socket.on('game:start', async ({ word, traitorId, maxTurns, theme }, cb) => {
     const lobby = lobbies[socket.data.lobbyCode];
     if (!lobby || socket.id !== lobby.hostId) return cb?.({ ok:false });
     if (!word) return cb?.({ ok:false, error:'Введи слово' });
@@ -279,8 +434,11 @@ io.on('connection', (socket) => {
 
     const spyPlayer = lobby.players.find(p => p.id === traitorId);
     let spyClass = 'default';
-    if (spyPlayer?.username && accounts[spyPlayer.username]) {
-      spyClass = accounts[spyPlayer.username].equippedClass || 'default';
+    if (spyPlayer?.username) {
+      const spyAccount = await getCachedAccount(spyPlayer.username);
+      if (spyAccount) {
+        spyClass = spyAccount.equippedClass || 'default';
+      }
     }
 
     lobby.word = word;

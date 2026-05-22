@@ -1,7 +1,7 @@
 {
   "name": "predatel-game",
   "version": "1.0.0",
-  "description": "Предатель — Multiplayer Party Game",
+  "description": "Шпион — Multiplayer Party Game",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

@@ -6,9 +6,6 @@
 <title>ШПИОН</title>
 <link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@400;700;900&family=Manrope:wght@300;400;600&display=swap" rel="stylesheet">
 <script src="/socket.io/socket.io.js"></script>
-<!-- Подключение Firebase App и Database SDK -->
-<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
 <style>
 :root{
   --bg:#0e0518;
@@ -400,14 +397,6 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
 <div id="toast"></div>
 
 <script>
-// Настройка Firebase с использованием предоставленной Realtime Database URL
-const firebaseConfig = {
-  databaseURL: "https://shpion-fb6cc-default-rtdb.firebaseio.com/"
-};
-// Инициализация Firebase
-const firebaseApp = firebase.initializeApp(firebaseConfig);
-const database = firebase.database();
-
 const socket = io();
 let me = {name:'',isHost:false,socketId:''};
 let lobbyCode = '';
@@ -436,17 +425,6 @@ function toast(msg,ok=false){const t=document.getElementById('toast');t.textCont
 
 socket.on('connect',()=>{me.socketId=socket.id;tryAutoLogin();});
 
-/* HELPER FOR FIREBASE SYNC */
-function syncAccountToFirebase(acc) {
-  if (!acc || !acc.username) return;
-  database.ref('users/' + acc.username).set({
-    username: acc.username,
-    coins: acc.coins,
-    inventory: acc.inventory || ['default'],
-    equippedClass: acc.equippedClass || 'default'
-  });
-}
-
 /* AUTH */
 function switchAuthTab(tab){
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
@@ -456,50 +434,30 @@ function switchAuthTab(tab){
 }
 
 function tryAutoLogin(){
-  const saved=localStorage.getItem('spy_account');
-  if(!saved)return;
-  try{
-    const{username,password}=JSON.parse(saved);
-    // Сначала ищем локально в базе Firebase
-    database.ref('users/' + username).once('value', snapshot => {
-      const fbData = snapshot.val();
-      socket.emit('account:login',{username,password},res=>{
-        if(res.ok) {
-          // Если данные в Firebase свежее, синхронизируем в сокет-сессию
-          if(fbData) {
-            res.account.coins = fbData.coins !== undefined ? fbData.coins : res.account.coins;
-            res.account.inventory = fbData.inventory || res.account.inventory;
-            res.account.equippedClass = fbData.equippedClass || res.account.equippedClass;
-            // Уведомляем бэкенд об актуализации данных у клиента
-            socket.emit('account:equipClass', {classId: res.account.equippedClass});
-          }
-          loginSuccess(res.account,password);
-        } else {
-          localStorage.removeItem('spy_account');
-        }
-      });
-    });
-  }catch(e){localStorage.removeItem('spy_account');}
+  const token=localStorage.getItem('spy_token');
+  if(!token)return;
+  socket.emit('account:autoLogin',{token},res=>{
+    if(res && res.ok){
+      account=res.account;
+      updateAccountDisplay();
+      document.getElementById('top-bar').style.display='flex';
+      document.getElementById('home-name').value=res.account.username;
+      showScreen('screen-home');
+    }else{
+      // Token expired/invalid — remove it
+      localStorage.removeItem('spy_token');
+    }
+  });
 }
 
 function doRegister(){
   const username=document.getElementById('reg-username').value.trim();
   const password=document.getElementById('reg-password').value;
   if(!username||!password){toast('Заполни поля!');return;}
-  
-  // Проверяем занятость имени в Firebase Realtime Database
-  database.ref('users/' + username).once('value', snapshot => {
-    if(snapshot.exists()) {
-      return toast('Данный логин уже занят!');
-    }
-    
-    socket.emit('account:register',{username,password},res=>{
-      if(!res.ok)return toast(res.error||'Ошибка');
-      // Сохраняем свежесозданный аккаунт в БД
-      syncAccountToFirebase(res.account);
-      loginSuccess(res.account,password);
-      toast('Аккаунт создан!',true);
-    });
+  socket.emit('account:register',{username,password},res=>{
+    if(!res.ok)return toast(res.error||'Ошибка');
+    loginSuccess(res.account,res.token);
+    toast('Аккаунт создан!',true);
   });
 }
 
@@ -507,30 +465,17 @@ function doLogin(){
   const username=document.getElementById('login-username').value.trim();
   const password=document.getElementById('login-password').value;
   if(!username||!password){toast('Заполни поля!');return;}
-  
-  // Сверяем аккаунт и подгружаем баланс/инвентарь
-  database.ref('users/' + username).once('value', snapshot => {
-    const fbData = snapshot.val();
-    socket.emit('account:login',{username,password},res=>{
-      if(!res.ok)return toast(res.error||'Ошибка');
-      if(fbData) {
-        res.account.coins = fbData.coins !== undefined ? fbData.coins : res.account.coins;
-        res.account.inventory = fbData.inventory || res.account.inventory;
-        res.account.equippedClass = fbData.equippedClass || res.account.equippedClass;
-        socket.emit('account:equipClass', {classId: res.account.equippedClass});
-      } else {
-        // Если по какой-то причине в Firebase не было записи, создаем её
-        syncAccountToFirebase(res.account);
-      }
-      loginSuccess(res.account,password);
-      toast('Добро пожаловать!',true);
-    });
+  socket.emit('account:login',{username,password},res=>{
+    if(!res.ok)return toast(res.error||'Ошибка');
+    loginSuccess(res.account,res.token);
+    toast('Добро пожаловать!',true);
   });
 }
 
-function loginSuccess(acc,password){
+function loginSuccess(acc,token){
   account=acc;
-  localStorage.setItem('spy_account',JSON.stringify({username:acc.username,password}));
+  // Save token (not password) - more secure
+  if(token)localStorage.setItem('spy_token',token);
   updateAccountDisplay();
   document.getElementById('top-bar').style.display='flex';
   document.getElementById('home-name').value=acc.username;
@@ -538,7 +483,11 @@ function loginSuccess(acc,password){
 }
 
 function logout(){
-  localStorage.removeItem('spy_account');
+  const token=localStorage.getItem('spy_token');
+  if(token){
+    socket.emit('account:logout',{token});
+  }
+  localStorage.removeItem('spy_token');
   account=null;
   document.getElementById('top-bar').style.display='none';
   socket.disconnect();
@@ -563,13 +512,10 @@ function topExitAction(){
 }
 
 function exitLobbyToHome(){
-  // Disconnect from lobby room without logging out
   if(lobbyCode){
     socket.disconnect();
-    // Reconnect to keep account session
     setTimeout(()=>{
-      // Save account info to re-login
-      const saved=localStorage.getItem('spy_account');
+      const token=localStorage.getItem('spy_token');
       lobbyCode='';
       me={name:'',isHost:false,socketId:''};
       myRole=null;
@@ -581,29 +527,16 @@ function exitLobbyToHome(){
       closeGuessInputModal();
       closeGuessLiveScreen();
       closeAbilityModal();
-      // Reconnect socket
       socket.connect();
-      // Re-login after reconnect
       socket.once('connect',()=>{
-        if(saved){
-          try{
-            const {username,password}=JSON.parse(saved);
-            database.ref('users/' + username).once('value', snapshot => {
-              const fbData = snapshot.val();
-              socket.emit('account:login',{username,password},res=>{
-                if(res.ok){
-                  account=res.account;
-                  if(fbData) {
-                    account.coins = fbData.coins !== undefined ? fbData.coins : account.coins;
-                    account.inventory = fbData.inventory || account.inventory;
-                    account.equippedClass = fbData.equippedClass || account.equippedClass;
-                  }
-                  updateAccountDisplay();
-                  document.getElementById('top-bar').style.display='flex';
-                }
-              });
-            });
-          }catch(e){}
+        if(token){
+          socket.emit('account:autoLogin',{token},res=>{
+            if(res && res.ok){
+              account=res.account;
+              updateAccountDisplay();
+              document.getElementById('top-bar').style.display='flex';
+            }
+          });
         }
         me.socketId=socket.id;
         showScreen('screen-home');
@@ -670,8 +603,6 @@ function equipClass(classId){
   socket.emit('account:equipClass',{classId},res=>{
     if(!res.ok)return toast(res.error||'Ошибка');
     account=res.account;
-    // Синхронизируем выбор класса в Firebase Realtime Database
-    syncAccountToFirebase(account);
     updateAccountDisplay();
     toast('Класс надет: '+CLASSES[classId].name,true);
   });
@@ -708,8 +639,6 @@ function buyClass(classId){
   socket.emit('account:buyClass',{classId},res=>{
     if(!res.ok)return toast(res.error||'Ошибка');
     account=res.account;
-    // Синхронизируем покупку и новый баланс в Firebase Realtime Database
-    syncAccountToFirebase(account);
     updateAccountDisplay();
     openShop();
     toast('Куплено: '+CLASSES[classId].name,true);
@@ -1159,16 +1088,7 @@ socket.on('game:backToLobby',()=>{
   showScreen('screen-waiting');
   toast('Возврат в лобби!',true);
 });
-socket.on('account:update',(a)=>{
-  if(account){
-    account.coins=a.coins;
-    account.inventory=a.inventory;
-    account.equippedClass=a.equippedClass;
-    // При получении игровых наград синхронизируем в Firebase Realtime Database
-    syncAccountToFirebase(account);
-    updateAccountDisplay();
-  }
-});
+socket.on('account:update',(a)=>{if(account){account.coins=a.coins;account.inventory=a.inventory;account.equippedClass=a.equippedClass;updateAccountDisplay();}});
 socket.on('host:promoted',()=>{me.isHost=true;toast('Ты ведущий!',true);});
 </script>
 </body>
