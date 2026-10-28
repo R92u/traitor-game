@@ -1,0 +1,31 @@
+:root{--bg:#101112;--surface:#17191b;--card:#1d1f21;--border:#36393c;--accent:#d73737;--accent2:#ff6861;--accent3:#b8c5cd;--gold:#dfba79;--text:#f2eee6;--muted:#a0a4a7;--green:#83b99e;--radius:6px;color-scheme:dark}
+body{background:var(--bg);line-height:1.55}
+body::before{background:linear-gradient(90deg,transparent 49.8%,#ffffff03 50%,transparent 50.2%),linear-gradient(#ffffff03 1px,transparent 1px);background-size:80px 80px;opacity:.7}
+.screen.active{padding:40px 24px}
+h1.logo{color:var(--text);background:none;-webkit-text-fill-color:currentColor;letter-spacing:-3px;font-size:clamp(2.7rem,9vw,5rem);line-height:1.15}
+h1.logo span{background:none;color:var(--accent2);-webkit-text-fill-color:currentColor}
+h2{line-height:1.4}.subtitle{font-family:Consolas,monospace;letter-spacing:2px;font-size:.75rem}
+.agency-mark{display:flex;align-items:center;gap:12px;color:var(--muted);font:11px Consolas,monospace;letter-spacing:3px;text-transform:uppercase}
+.agency-mark::before{content:'';width:28px;height:28px;border:1px solid var(--accent);background:linear-gradient(45deg,transparent 45%,var(--accent) 46%,var(--accent) 54%,transparent 55%);transform:rotate(45deg)}
+.dossier-caption{font:11px Consolas,monospace;letter-spacing:2px;text-transform:uppercase;color:var(--accent2);text-align:left;border-bottom:1px solid var(--border);padding-bottom:16px;margin-bottom:20px}
+.card{position:relative;background:linear-gradient(125deg,#232527,#1a1c1e);padding:26px;border-top:2px solid #56595b;box-shadow:0 18px 48px #0003;text-align:left}
+#screen-auth .card::after{content:'ДОСТУП / 01';position:absolute;right:18px;top:-11px;background:var(--card);padding:0 8px;font:10px Consolas,monospace;letter-spacing:2px;color:var(--muted)}
+#screen-auth .wrap{max-width:460px!important}#screen-home .card{max-width:480px!important}
+.btn{border-radius:4px;min-height:48px;letter-spacing:.3px;transition:background .18s,border-color .18s,transform .18s}
+.btn-primary{background:#ca3434;box-shadow:none;font-weight:700}.btn-primary:hover{background:#e34440;box-shadow:none;transform:translateY(-1px)}
+.btn-secondary{background:#292c2f}.btn-ghost{background:transparent}.btn-green{background:#83b99e;box-shadow:none}.btn-gold{background:var(--gold)}
+input,textarea,select{border-radius:4px;background:#121415;min-height:48px;padding:12px 14px}input:focus,textarea:focus,select:focus{border-color:var(--accent2);box-shadow:0 0 0 3px #ff686114}
+:focus-visible{outline:2px solid var(--accent2);outline-offset:4px}label{letter-spacing:1.2px;font-size:.7rem}input::placeholder{color:#858b90}
+.tabs{gap:0;margin-bottom:24px}.tab{flex:1;text-align:center;padding:12px 8px}.tab.active{background:#ff686108}
+.tag{border-radius:3px;padding:4px 8px;font-size:.68rem;letter-spacing:.5px}.tag-red{background:#d7373718;border-color:#d7373755}.tag-blue{background:#b8c5cd0d;border-color:#b8c5cd33}
+.player-chip,.lobby-item,.score-row,.vote-option,.status-bar,.class-card{border-radius:5px}.player-chip{padding:9px 12px}.avatar{border-radius:5px}
+.lobby-item,.vote-option{min-height:58px}.lobby-item.selected,.vote-option.selected{background:#d7373714;border-color:var(--accent2)}
+.big-code{background:#101213;border:1px dashed #626568;border-radius:4px;color:var(--text);letter-spacing:7px;font-family:Consolas,monospace;padding:18px 28px}
+.role-reveal{border-radius:6px;padding:34px 26px}.role-reveal.civilian{background:linear-gradient(145deg,#25302c,#171d1b);border-color:#83b99e66}.role-reveal.spy{background:linear-gradient(145deg,#381f20,#201719);border-color:#d7373788}.role-reveal.civilian .role-title{color:var(--green)}
+.word-box{border-radius:4px;border:1px dashed #ffffff30}.table-circle{background:radial-gradient(circle,#282d2e,#171b1d);border:1px solid #767d80;box-shadow:0 0 0 9px #ffffff03,0 0 0 10px #ffffff0b,inset 0 0 50px #0007}.table-word{text-shadow:none;overflow-wrap:anywhere}.player-seat.current{filter:drop-shadow(0 0 7px #dfba7940)}
+.top-bar{background:#101112ed;padding:12px 24px}.shop-btn{border-radius:4px;background:#ca3434;box-shadow:none;min-height:40px}.shop-btn:hover{background:#e34440;box-shadow:none}.coins-display{border-radius:4px}.account-info{min-width:0}.username-display{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.modal-bg{backdrop-filter:blur(6px)}.modal-card{border-top:2px solid var(--accent);padding:28px}.guess-live-card{border-radius:6px;box-shadow:0 24px 80px #0008}.guess-live-text{border-radius:4px}.roulette-machine{background:linear-gradient(#29241e,#181818);border-width:1px;border-radius:6px;box-shadow:none}.roulette-slot{border-width:1px;border-radius:4px}.class-card.equipped{box-shadow:none}
+#toast{border-radius:4px;max-width:calc(100vw - 32px);width:max-content}#join-code{font-family:Consolas,monospace;letter-spacing:4px}
+@media(min-width:900px){#screen-auth.active{justify-content:center}#screen-auth::after{content:'БЮРО РАССЛЕДОВАНИЙ / СЕКРЕТНО';position:fixed;left:28px;bottom:24px;font:10px Consolas,monospace;letter-spacing:3px;color:#747a7e}}
+@media(max-width:600px){.screen.active{padding:24px 16px}.card,.modal-card{padding:20px}.top-bar{padding:10px 12px;gap:8px}.account-info{gap:7px}.username-display{max-width:85px;font-size:.8rem}.coins-display{padding:6px;font-size:.72rem}.shop-btn{padding:8px;font-size:.75rem}.top-bar .btn{padding:8px;min-height:40px;font-size:.75rem}#screen-auth .wrap{padding:36px 0!important}.game-table{max-width:100%;}.player-seat{width:76px}.player-seat-name{max-width:76px}.modal-bg{padding:12px}h1.logo{letter-spacing:-2px}.guess-live-text{font-size:1.4rem}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}.anim-delay-1,.anim-delay-2{opacity:1}}
