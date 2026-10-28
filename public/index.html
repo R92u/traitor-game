@@ -162,6 +162,7 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
 </style>
+<link rel="stylesheet" href="/dossier.css">
 </head>
 <body>
 
@@ -179,11 +180,11 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
 <!-- AUTH -->
 <div id="screen-auth" class="screen active center">
   <div class="wrap flex-col center gap-m" style="padding:50px 0;max-width:420px;">
-    <span style="font-size:3.2rem;" class="anim">🕵️</span>
+    <div class="agency-mark anim">Бюро расследований</div>
     <h1 class="logo anim anim-delay-1">Ш<span>ПИ</span>ОН</h1>
-    <p class="subtitle anim anim-delay-2">Войди или зарегистрируйся</p>
+    <p class="subtitle anim anim-delay-2">Доверяй фактам. Подозревай каждого.</p>
     <div class="card mt-xl anim" style="width:100%;">
-      <div class="tabs">
+      <div class="dossier-caption">Личное дело / идентификация</div><div class="tabs">
         <div class="tab active" id="tab-login" onclick="switchAuthTab('login')">Вход</div>
         <div class="tab" id="tab-register" onclick="switchAuthTab('register')">Регистрация</div>
       </div>
@@ -202,16 +203,16 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
         </div>
       </div>
     </div>
-    <p style="color:var(--muted);font-size:.78rem;text-align:center;">Аккаунт сохраняется на сервере и в браузере</p>
+    <p style="color:var(--muted);font-size:.78rem;text-align:center;">Твоя легенда начинается здесь.</p>
   </div>
 </div>
 
 <!-- HOME -->
 <div id="screen-home" class="screen center">
   <div class="wrap flex-col center gap-m" style="padding:80px 0 50px;">
-    <span style="font-size:3.2rem;" class="anim">🕵️</span>
+    <div class="agency-mark anim">Бюро расследований</div>
     <h1 class="logo anim anim-delay-1">Ш<span>ПИ</span>ОН</h1>
-    <p class="subtitle anim anim-delay-2">Социальная игра на доверие</p>
+    <p class="subtitle anim anim-delay-2">Один из вас знает меньше. И скрывает больше.</p>
     <div class="card mt-xl anim" style="width:100%;max-width:420px;">
       <div class="flex-col gap-m">
         <div>
