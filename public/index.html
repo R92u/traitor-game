@@ -177,38 +177,8 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
   </div>
 </div>
 
-<!-- AUTH -->
-<div id="screen-auth" class="screen active center">
-  <div class="wrap flex-col center gap-m" style="padding:50px 0;max-width:420px;">
-    <div class="agency-mark anim">Бюро расследований</div>
-    <h1 class="logo anim anim-delay-1">Ш<span>ПИ</span>ОН</h1>
-    <p class="subtitle anim anim-delay-2">Доверяй фактам. Подозревай каждого.</p>
-    <div class="card mt-xl anim" style="width:100%;">
-      <div class="dossier-caption">Личное дело / идентификация</div><div class="tabs">
-        <div class="tab active" id="tab-login" onclick="switchAuthTab('login')">Вход</div>
-        <div class="tab" id="tab-register" onclick="switchAuthTab('register')">Регистрация</div>
-      </div>
-      <div id="auth-login">
-        <div class="flex-col gap-m">
-          <div><label>Логин</label><input id="login-username" type="text" placeholder="Логин..." maxlength="20" autocomplete="off"></div>
-          <div><label>Пароль</label><input id="login-password" type="password" placeholder="Пароль..." onkeydown="if(event.key==='Enter') doLogin()"></div>
-          <button class="btn btn-primary btn-full" onclick="doLogin()">Войти</button>
-        </div>
-      </div>
-      <div id="auth-register" style="display:none;">
-        <div class="flex-col gap-m">
-          <div><label>Логин (мин 3 символа)</label><input id="reg-username" type="text" placeholder="Придумай логин..." maxlength="20" autocomplete="off"></div>
-          <div><label>Пароль (мин 4 символа)</label><input id="reg-password" type="password" placeholder="Пароль..." onkeydown="if(event.key==='Enter') doRegister()"></div>
-          <button class="btn btn-primary btn-full" onclick="doRegister()">Создать аккаунт</button>
-        </div>
-      </div>
-    </div>
-    <p style="color:var(--muted);font-size:.78rem;text-align:center;">Твоя легенда начинается здесь.</p>
-  </div>
-</div>
-
 <!-- HOME -->
-<div id="screen-home" class="screen center">
+<div id="screen-home" class="screen active center">
   <div class="wrap flex-col center gap-m" style="padding:80px 0 50px;">
     <div class="agency-mark anim">Бюро расследований</div>
     <h1 class="logo anim anim-delay-1">Ш<span>ПИ</span>ОН</h1>
@@ -218,7 +188,7 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
         <div>
           <label>Никнейм для игры</label>
           <input id="home-name" type="text" placeholder="Введите никнейм..." maxlength="20" onkeydown="if(event.key==='Enter') createLobby()">
-          <p style="font-size:.72rem;color:var(--muted);margin-top:4px;">Можно менять перед каждой игрой</p>
+          <p style="font-size:.72rem;color:var(--muted);margin-top:4px;">Имя, монеты и классы сохраняются в этом браузере</p>
         </div>
         <button class="btn btn-primary btn-full" onclick="createLobby()">+ Создать лобби</button>
         <div class="sep"></div>
@@ -397,6 +367,7 @@ label{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:upperca
 
 <div id="toast"></div>
 
+<script src="/profile.js"></script>
 <script>
 const socket = io();
 let me = {name:'',isHost:false,socketId:''};
@@ -408,7 +379,7 @@ let selectedVoteTarget = null;
 let myVoteSubmitted = false;
 let selectedLobbyCode = null;
 let voteTimerInterval = null;
-let account = null;
+let account = BrowserProfile.load();
 
 const CLASSES = {
   'default':{id:'default',name:'Обычный',icon:'🕵️',desc:'Узнать первую букву слова',price:0,ability:'hint'},
@@ -424,150 +395,33 @@ function av(name){return name&&name.length>0?name.charAt(0).toUpperCase():'?';}
 function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0);if(typeof updateExitButton==='function')updateExitButton();}
 function toast(msg,ok=false){const t=document.getElementById('toast');t.textContent=msg;t.style.borderColor=ok?'var(--green)':'var(--border)';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2500);}
 
-socket.on('connect',()=>{me.socketId=socket.id;tryAutoLogin();});
-
-/* AUTH */
-function switchAuthTab(tab){
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('tab-'+tab).classList.add('active');
-  document.getElementById('auth-login').style.display=tab==='login'?'block':'none';
-  document.getElementById('auth-register').style.display=tab==='register'?'block':'none';
-}
-
-function tryAutoLogin(){
-  const token=localStorage.getItem('spy_token');
-  if(!token)return;
-  socket.emit('account:autoLogin',{token},res=>{
-    if(res && res.ok){
-      account=res.account;
-      updateAccountDisplay();
-      document.getElementById('top-bar').style.display='flex';
-      document.getElementById('home-name').value=res.account.username;
-      showScreen('screen-home');
-    }else{
-      // Token expired/invalid — remove it
-      localStorage.removeItem('spy_token');
-    }
-  });
-}
-
-function doRegister(){
-  const username=document.getElementById('reg-username').value.trim();
-  const password=document.getElementById('reg-password').value;
-  if(!username||!password){toast('Заполни поля!');return;}
-  socket.emit('account:register',{username,password},res=>{
-    if(!res.ok)return toast(res.error||'Ошибка');
-    loginSuccess(res.account,res.token);
-    toast('Аккаунт создан!',true);
-  });
-}
-
-function doLogin(){
-  const username=document.getElementById('login-username').value.trim();
-  const password=document.getElementById('login-password').value;
-  if(!username||!password){toast('Заполни поля!');return;}
-  socket.emit('account:login',{username,password},res=>{
-    if(!res.ok)return toast(res.error||'Ошибка');
-    loginSuccess(res.account,res.token);
-    toast('Добро пожаловать!',true);
-  });
-}
-
-function loginSuccess(acc,token){
-  account=acc;
-  // Save token (not password) - more secure
-  if(token)localStorage.setItem('spy_token',token);
+function saveProfile(){
+  if(!BrowserProfile.save(account)) toast('Браузер не разрешает сохранение. Прогресс доступен только до закрытия страницы.');
   updateAccountDisplay();
-  document.getElementById('top-bar').style.display='flex';
-  document.getElementById('home-name').value=acc.username;
-  showScreen('screen-home');
 }
-
-function logout(){
-  const token=localStorage.getItem('spy_token');
-  if(token){
-    socket.emit('account:logout',{token});
-  }
-  localStorage.removeItem('spy_token');
-  account=null;
-  document.getElementById('top-bar').style.display='none';
-  socket.disconnect();
-  setTimeout(()=>location.reload(),300);
-}
-
-// PATCH: Context-aware exit button
-function topExitAction(){
-  // If user is in a lobby/game (not on home/auth), exit to home
-  const inLobby = document.getElementById('screen-waiting').classList.contains('active') ||
-                  document.getElementById('screen-reveal').classList.contains('active') ||
-                  document.getElementById('screen-game').classList.contains('active') ||
-                  document.getElementById('screen-end').classList.contains('active') ||
-                  document.getElementById('screen-browser').classList.contains('active');
-  if(inLobby){
-    // Exit lobby, return to home (keep account logged in)
-    exitLobbyToHome();
-  }else{
-    // On home screen - log out account
-    logout();
-  }
-}
-
+function syncProfile(){socket.emit('profile:sync',{equippedClass:account.equippedClass});}
+socket.on('connect',()=>{
+  me.socketId=socket.id;
+  syncProfile();
+  if(lobbyCode) exitLobbyToHome();
+});
+function topExitAction(){exitLobbyToHome();}
 function exitLobbyToHome(){
-  if(lobbyCode){
-    socket.disconnect();
-    setTimeout(()=>{
-      const token=localStorage.getItem('spy_token');
-      lobbyCode='';
-      me={name:'',isHost:false,socketId:''};
-      myRole=null;
-      myAbilityResult=null;
-      alreadyViewedRole=false;
-      canViewRole=false;
-      gameState={state:'waiting',players:[]};
-      closeVoteModal();
-      closeGuessInputModal();
-      closeGuessLiveScreen();
-      closeAbilityModal();
-      socket.connect();
-      socket.once('connect',()=>{
-        if(token){
-          socket.emit('account:autoLogin',{token},res=>{
-            if(res && res.ok){
-              account=res.account;
-              updateAccountDisplay();
-              document.getElementById('top-bar').style.display='flex';
-            }
-          });
-        }
-        me.socketId=socket.id;
-        showScreen('screen-home');
-        updateExitButton();
-        toast('Вышел из лобби',true);
-      });
-    },200);
-  }else{
-    showScreen('screen-home');
-    updateExitButton();
-  }
+  const wasInLobby=!!lobbyCode;
+  if(wasInLobby) socket.disconnect();
+  lobbyCode='';
+  me={name:account.username,isHost:false,socketId:socket.id||''};
+  myRole=null;myAbilityResult=null;alreadyViewedRole=false;canViewRole=false;
+  gameState={state:'waiting',players:[]};
+  closeVoteModal();closeGuessInputModal();closeGuessLiveScreen();closeAbilityModal();closeShop();
+  showScreen('screen-home');
+  if(wasInLobby) socket.connect();
 }
-
 function updateExitButton(){
   const btn=document.getElementById('top-exit-btn');
-  if(!btn)return;
-  const inLobby = document.getElementById('screen-waiting').classList.contains('active') ||
-                  document.getElementById('screen-reveal').classList.contains('active') ||
-                  document.getElementById('screen-game').classList.contains('active') ||
-                  document.getElementById('screen-end').classList.contains('active') ||
-                  document.getElementById('screen-browser').classList.contains('active');
-  if(inLobby){
-    btn.textContent='← В меню';
-    btn.style.borderColor='var(--accent2)';
-    btn.style.color='var(--accent2)';
-  }else{
-    btn.textContent='Выход';
-    btn.style.borderColor='';
-    btn.style.color='';
-  }
+  btn.hidden=document.getElementById('screen-home').classList.contains('active');
+  btn.style.display=btn.hidden?'none':'';
+  btn.textContent='← В меню';
 }
 
 function updateAccountDisplay(){
@@ -601,17 +455,14 @@ function renderInventory(){
 }
 
 function equipClass(classId){
-  socket.emit('account:equipClass',{classId},res=>{
-    if(!res.ok)return toast(res.error||'Ошибка');
-    account=res.account;
-    updateAccountDisplay();
-    toast('Класс надет: '+CLASSES[classId].name,true);
-  });
+  if(!account.inventory.includes(classId))return;
+  account.equippedClass=classId;
+  saveProfile();syncProfile();
+  toast('Класс надет: '+CLASSES[classId].name,true);
 }
 
 /* SHOP */
 function openShop(){
-  if(!account){toast('Войди в аккаунт');return;}
   document.getElementById('shop-coins').textContent=account.coins;
   const el=document.getElementById('shop-list');
   el.innerHTML=Object.values(CLASSES).filter(c=>c.id!=='default').map(c=>{
@@ -637,21 +488,19 @@ function openShop(){
 function closeShop(){document.getElementById('shop-modal-bg').classList.remove('show');}
 
 function buyClass(classId){
-  socket.emit('account:buyClass',{classId},res=>{
-    if(!res.ok)return toast(res.error||'Ошибка');
-    account=res.account;
-    updateAccountDisplay();
-    openShop();
-    toast('Куплено: '+CLASSES[classId].name,true);
-  });
+  const cls=CLASSES[classId];
+  if(!cls||account.inventory.includes(classId))return;
+  if(account.coins<cls.price)return toast('Не хватает монет');
+  account.coins-=cls.price;account.inventory.push(classId);
+  saveProfile();openShop();toast('Куплено: '+cls.name,true);
 }
 
 /* HOME */
-function createLobby(){const n=document.getElementById('home-name').value.trim();if(!n){toast('Введите имя!');return;}me.name=n;socket.emit('lobby:create',{name:n},res=>{if(!res.ok)return toast(res.error||'Ошибка');me.isHost=true;lobbyCode=res.code;enterWaiting();});}
+function createLobby(){const n=document.getElementById('home-name').value.trim();if(!n){toast('Введите имя!');return;}account.username=n;saveProfile();me.name=n;socket.emit('lobby:create',{name:n},res=>{if(!res.ok)return toast(res.error||'Ошибка');me.isHost=true;lobbyCode=res.code;enterWaiting();});}
 
-function joinByCode(){const c=document.getElementById('join-code').value.trim().toUpperCase();if(!c||c.length!==5)return toast('Введите код!');const n=document.getElementById('home-name').value.trim();if(!n)return toast('Введите имя!');me.name=n;doJoin(c,n);}
+function joinByCode(){const c=document.getElementById('join-code').value.trim().toUpperCase();if(!c||c.length!==5)return toast('Введите код!');const n=document.getElementById('home-name').value.trim();if(!n)return toast('Введите имя!');account.username=n;saveProfile();me.name=n;doJoin(c,n);}
 
-function doJoin(code,name){socket.emit('lobby:join',{code,name},res=>{if(!res.ok)return toast(res.error||'Ошибка');me.isHost=res.isHost;lobbyCode=res.code;enterWaiting();});}
+function doJoin(code,name){account.username=name;saveProfile();socket.emit('lobby:join',{code,name},res=>{if(!res.ok)return toast(res.error||'Ошибка');me.isHost=res.isHost;lobbyCode=res.code;enterWaiting();});}
 
 function openLobbyBrowser(){document.getElementById('browser-name').value=document.getElementById('home-name').value.trim();selectedLobbyCode=null;refreshBrowser();showScreen('screen-browser');}
 
@@ -659,7 +508,7 @@ function refreshBrowser(){socket.emit('lobbies:list',res=>{const el=document.get
 
 function selectLobby(code){selectedLobbyCode=code;document.querySelectorAll('.lobby-item').forEach(el=>el.classList.remove('selected'));const el=document.getElementById('litem-'+code);if(el)el.classList.add('selected');document.getElementById('btn-join-selected').disabled=false;}
 
-function joinSelected(){if(!selectedLobbyCode)return;const n=document.getElementById('browser-name').value.trim()||document.getElementById('home-name').value.trim();if(!n)return toast('Введите имя!');me.name=n;doJoin(selectedLobbyCode,n);}
+function joinSelected(){if(!selectedLobbyCode)return;const n=document.getElementById('browser-name').value.trim()||document.getElementById('home-name').value.trim();if(!n)return toast('Введите имя!');account.username=n;saveProfile();me.name=n;doJoin(selectedLobbyCode,n);}
 
 /* WAITING */
 function enterWaiting(){document.getElementById('lobby-code-display').textContent=lobbyCode;document.getElementById('host-panel').style.display=me.isHost?'block':'none';document.getElementById('guest-wait-msg').style.display=me.isHost?'none':'block';showScreen('screen-waiting');}
@@ -1089,8 +938,21 @@ socket.on('game:backToLobby',()=>{
   showScreen('screen-waiting');
   toast('Возврат в лобби!',true);
 });
-socket.on('account:update',(a)=>{if(account){account.coins=a.coins;account.inventory=a.inventory;account.equippedClass=a.equippedClass;updateAccountDisplay();}});
+socket.on('profile:reward',({amount})=>{
+  if(!Number.isSafeInteger(amount)||amount<=0)return;
+  account=BrowserProfile.load(account);
+  account.coins+=amount;saveProfile();
+});
 socket.on('host:promoted',()=>{me.isHost=true;toast('Ты ведущий!',true);});
+document.getElementById('top-bar').style.display='flex';
+document.getElementById('home-name').value=account.username;
+document.getElementById('home-name').addEventListener('input',e=>{account.username=e.target.value.trim().slice(0,20);saveProfile();});
+window.addEventListener('storage',e=>{
+  if(e.key!==BrowserProfile.key)return;
+  account=BrowserProfile.load();updateAccountDisplay();syncProfile();
+  document.getElementById('home-name').value=account.username;
+});
+updateAccountDisplay();updateExitButton();
 </script>
 </body>
 </html>
